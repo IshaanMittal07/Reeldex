@@ -1,61 +1,63 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
+import { useShareIntentContext } from 'expo-share-intent';
+import { Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AnimatedIcon } from '@/components/animated-icon';
 import { HintRow } from '@/components/hint-row';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
+// Sprint 0 proof: show exactly what another app hands Reeldex through the share
+// sheet (plan Section 4, "test on a real device"). Replaced by the Library in Sprint 3.
+
+function formatBytes(bytes: number | null) {
+  return bytes == null ? 'unknown' : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatDuration(ms: number | null) {
+  return ms == null ? 'unknown' : `${Math.round(ms / 1000)} s`;
 }
 
 export default function HomeScreen() {
+  const { hasShareIntent, shareIntent, resetShareIntent, error } = useShareIntentContext();
+
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
-
-        <ThemedText type="code" style={styles.code}>
-          get started
+        <ThemedText type="title" style={styles.title}>
+          Reeldex
         </ThemedText>
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
+        {!hasShareIntent && (
+          <ThemedText style={styles.center}>
+            Download a reel, then share it to Reeldex from the share sheet.
+          </ThemedText>
+        )}
 
-        {Platform.OS === 'web' && <WebBadge />}
+        {hasShareIntent && (
+          <ThemedView type="backgroundElement" style={styles.panel}>
+            <HintRow title="Type" hint={<ThemedText type="code">{shareIntent.type ?? 'none'}</ThemedText>} />
+            {shareIntent.webUrl && <HintRow title="Link" hint={<ThemedText type="small">{shareIntent.webUrl}</ThemedText>} />}
+            {shareIntent.text && <HintRow title="Text" hint={<ThemedText type="small">{shareIntent.text}</ThemedText>} />}
+            {shareIntent.files?.map((file) => (
+              <ThemedView key={file.path} type="backgroundElement" style={styles.file}>
+                <HintRow title="File" hint={<ThemedText type="small">{file.fileName}</ThemedText>} />
+                <HintRow title="MIME" hint={<ThemedText type="code">{file.mimeType}</ThemedText>} />
+                <HintRow title="Size" hint={<ThemedText type="small">{formatBytes(file.size)}</ThemedText>} />
+                <HintRow title="Length" hint={<ThemedText type="small">{formatDuration(file.duration)}</ThemedText>} />
+              </ThemedView>
+            ))}
+            <Pressable onPress={() => resetShareIntent()} accessibilityRole="button">
+              <ThemedText type="linkPrimary">Clear</ThemedText>
+            </Pressable>
+          </ThemedView>
+        )}
+
+        {error && (
+          <ThemedText themeColor="textSecondary" style={styles.center}>
+            {error}
+          </ThemedText>
+        )}
       </SafeAreaView>
     </ThemedView>
   );
@@ -70,29 +72,25 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     paddingHorizontal: Spacing.four,
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: Spacing.three,
+    gap: Spacing.four,
     paddingBottom: BottomTabInset + Spacing.three,
     maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
   },
   title: {
     textAlign: 'center',
   },
-  code: {
-    textTransform: 'uppercase',
+  center: {
+    textAlign: 'center',
   },
-  stepContainer: {
+  panel: {
     gap: Spacing.three,
     alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
+    padding: Spacing.four,
     borderRadius: Spacing.four,
+  },
+  file: {
+    gap: Spacing.two,
   },
 });
