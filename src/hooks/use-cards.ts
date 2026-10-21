@@ -53,5 +53,5 @@ export function useCard(id: string) {
       });
   }, [id]);
 
-  return { card, isLoading };
+  return { card, isLoading, setCard };
 }

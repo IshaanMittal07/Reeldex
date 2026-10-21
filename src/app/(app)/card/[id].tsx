@@ -1,9 +1,10 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { ActionItems, KeyPoints, Resources, Warnings } from '@/components/card-sections';
 import { CategorySections } from '@/components/category-sections';
+import { ReelLink } from '@/components/reel-link';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
@@ -25,7 +26,7 @@ function confirmDelete(onConfirm: () => void) {
 
 export default function CardScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { card, isLoading } = useCard(id);
+  const { card, isLoading, setCard } = useCard(id);
   const [deleting, setDeleting] = useState(false);
 
   if (isLoading) {
@@ -64,6 +65,7 @@ export default function CardScreen() {
           )}
         </View>
 
+        <ReelLink cardId={card.id} url={card.source_url} onChange={(url) => setCard({ ...card, source_url: url })} />
         <Warnings warnings={data.warnings} />
         <KeyPoints points={data.key_points} />
         <ActionItems items={data.action_items} />
@@ -71,11 +73,6 @@ export default function CardScreen() {
         <Resources resources={data.resources} />
 
         <View style={styles.footer}>
-          {card.source_url && (
-            <Pressable onPress={() => Linking.openURL(card.source_url!)} accessibilityRole="link">
-              <ThemedText type="linkPrimary">Open original reel</ThemedText>
-            </Pressable>
-          )}
           <ThemedText type="small" themeColor="textSecondary">
             Saved {new Date(card.created_at).toLocaleDateString()}
           </ThemedText>
