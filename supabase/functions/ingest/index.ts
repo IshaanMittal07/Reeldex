@@ -8,6 +8,7 @@ import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 import { createClient } from '@supabase/supabase-js';
 
 import { cardJsonSchema, cardSchema } from '../../../shared/schemas/card.ts';
+import { reelUrl } from '../../../shared/reel-url.ts';
 import { deleteFile, extract, RateLimitError, uploadFile, waitUntilActive } from './gemini.ts';
 
 const PROMPT_VERSION = 'extract.v1';
@@ -89,6 +90,7 @@ async function handleUpload(req: Request) {
   const upload = await readUpload(req);
   if (!upload || upload.bytes.byteLength === 0) return json({ error: 'No video in request' }, 400);
   upload.mimeType = sniffMime(upload.bytes, upload.mimeType);
+  upload.url = reelUrl(upload.url);
   if (upload.bytes.byteLength > MAX_BYTES) return json({ error: 'Video is over 50 MB' }, 413);
   if (!GEMINI_MIME[upload.mimeType]) return json({ error: `Unsupported type ${upload.mimeType}` }, 415);
 
@@ -101,7 +103,14 @@ async function handleUpload(req: Request) {
     .neq('status', 'failed')
     .limit(1)
     .maybeSingle();
-  if (existing) return json({ job_id: existing.id, status: existing.status, duplicate: true });
+  if (existing) {
+    // Re-sharing a saved video with its link backfills the link.
+    if (upload.url) {
+      await db.from('jobs').update({ source_url: upload.url }).eq('id', existing.id).is('source_url', null);
+      await db.from('cards').update({ source_url: upload.url }).eq('job_id', existing.id).is('source_url', null);
+    }
+    return json({ job_id: existing.id, status: existing.status, duplicate: true });
+  }
 
   const { data: allowed } = await db.rpc('use_quota', { p_user_id: userId });
   if (!allowed) return json({ error: 'Monthly quota used up' }, 429);
