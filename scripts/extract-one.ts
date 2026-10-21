@@ -12,7 +12,7 @@ async function main() {
   if (!process.env.GEMINI_API_KEY || !model) throw new Error('Set GEMINI_API_KEY and GEMINI_MODEL in .env');
 
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  const prompt = readFileSync('prompts/extract.v1.md', 'utf8').replace('{caption}', caption);
+  const prompt = readFileSync('prompts/extract.v2.md', 'utf8').replace('{caption}', caption);
 
   let file = await ai.files.upload({ file: videoPath, config: { mimeType: 'video/mp4' } });
   try {

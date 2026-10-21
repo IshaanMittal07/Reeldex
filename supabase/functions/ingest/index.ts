@@ -10,15 +10,16 @@ import { createClient } from '@supabase/supabase-js';
 import { cardJsonSchema, cardSchema } from '../../../shared/schemas/card.ts';
 import { reelUrl } from '../../../shared/reel-url.ts';
 import { deleteFile, extract, RateLimitError, uploadFile, waitUntilActive } from './gemini.ts';
+import { dispatchFrames } from './github.ts';
 
-const PROMPT_VERSION = 'extract.v1';
+const PROMPT_VERSION = 'extract.v2';
 const MAX_ATTEMPTS = 3;
 const MAX_BYTES = 50 * 1024 * 1024;
 const BUCKET = 'incoming';
 // Gemini names .mov as video/mov, iOS sends video/quicktime.
 const GEMINI_MIME: Record<string, string> = { 'video/mp4': 'video/mp4', 'video/quicktime': 'video/mov' };
 
-const promptTemplate = Deno.readTextFile(new URL('../../../prompts/extract.v1.md', import.meta.url));
+const promptTemplate = Deno.readTextFile(new URL('../../../prompts/extract.v2.md', import.meta.url));
 
 function secretKey() {
   const keys = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? '{}') as Record<string, string>;
@@ -178,7 +179,7 @@ async function processJob(jobId: string, bytes?: Uint8Array) {
     }
 
     const card = cardSchema.parse(JSON.parse(text)) as Record<string, any>;
-    const { error: cardError } = await db.from('cards').insert({
+    const { data: saved, error: cardError } = await db.from('cards').insert({
       user_id: job.user_id,
       job_id: jobId,
       category: card.category,
@@ -191,10 +192,18 @@ async function processJob(jobId: string, bytes?: Uint8Array) {
       creator_handle: card.creator_handle,
       model_version: model,
       prompt_version: PROMPT_VERSION,
-    });
-    if (cardError) throw new Error(`Cards: ${cardError.message}`);
+    }).select('id').single();
+    if (cardError || !saved) throw new Error(`Cards: ${cardError?.message}`);
 
-    await finish(jobId, job.video_path, { status: 'done', error: null });
+    // Frames to cut: keep the video for the Actions job, which deletes it when done.
+    if (card.key_frames?.length && (await dispatchFrames(jobId))) {
+      await db
+        .from('jobs')
+        .update({ status: 'done', error: null, frames_status: 'pending', updated_at: new Date().toISOString() })
+        .eq('id', jobId);
+    } else {
+      await finish(jobId, job.video_path, { status: 'done', error: null });
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('processJob failed', jobId, attempts, message);
@@ -241,6 +250,18 @@ async function sweep() {
       next ??= job.id;
     }
   }
+  // Frame jobs that never reported back: drop the video, keep the card.
+  const framesBefore = new Date(now - 20 * 60_000).toISOString();
+  const { data: lostFrames } = await db
+    .from('jobs')
+    .select('id, video_path')
+    .eq('frames_status', 'pending')
+    .lt('updated_at', framesBefore);
+  for (const job of lostFrames ?? []) {
+    if (job.video_path) await db.storage.from(BUCKET).remove([job.video_path]);
+    await db.from('jobs').update({ frames_status: 'failed', video_path: null }).eq('id', job.id);
+  }
+
   // One job per run keeps us inside the wall-clock limit and Gemini's RPM.
   if (next) await processJob(next);
 }
