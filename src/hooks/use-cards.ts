@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import type { Card } from '@/lib/types';
 
-const COLUMNS = 'id, category, title, summary, data, source_url, creator_handle, pinned, created_at';
+const COLUMNS = 'id, category, title, summary, data, frames, source_url, creator_handle, pinned, created_at';
 
 // All of the user's cards (RLS scopes the query), newest first, kept live via
 // Realtime so a card shared from the Shortcut appears without a refresh.

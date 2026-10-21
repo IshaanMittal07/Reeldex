@@ -37,6 +37,19 @@ export type ColdDmData = {
   personalization_slots: string[];
 };
 
+export type KeyFrame = { timestamp: string; caption: string; why: string };
+
+export type Visual = {
+  kind: 'table' | 'flow';
+  title: string;
+  columns: string[];
+  rows: string[][];
+  steps: { label: string; detail: string | null }[];
+};
+
+// A frame cut from the video and stored in the `frames` bucket.
+export type Frame = { path: string; timestamp: string; caption: string };
+
 export type CardData = {
   is_actionable: boolean;
   category: Category;
@@ -49,6 +62,9 @@ export type CardData = {
   creator_handle: string | null;
   action_items: string[];
   warnings: string[];
+  // Optional: cards made before prompt v2 don't have them.
+  key_frames?: KeyFrame[];
+  visual?: Visual | null;
   resume: ResumeData | null;
   cold_dm: ColdDmData | null;
 };
@@ -59,6 +75,7 @@ export type Card = {
   title: string;
   summary: string | null;
   data: CardData;
+  frames: Frame[];
   source_url: string | null;
   creator_handle: string | null;
   pinned: boolean;
