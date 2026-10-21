@@ -4,9 +4,11 @@ import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, 
 
 import { ActionItems, KeyPoints, Resources, Warnings } from '@/components/card-sections';
 import { CategorySections } from '@/components/category-sections';
+import { FrameGallery } from '@/components/frame-gallery';
 import { ReelLink } from '@/components/reel-link';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { VisualBlock } from '@/components/visual-block';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useCard } from '@/hooks/use-cards';
 import { supabase } from '@/lib/supabase';
@@ -28,6 +30,7 @@ export default function CardScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { card, isLoading, setCard } = useCard(id);
   const [deleting, setDeleting] = useState(false);
+  const [openedAt] = useState(() => Date.now());
 
   if (isLoading) {
     return (
@@ -45,6 +48,9 @@ export default function CardScreen() {
   }
 
   const { data } = card;
+  // Frames were requested and the card is recent enough that the job may still be running.
+  const framesPending =
+    !!data.key_frames?.length && !card.frames.length && openedAt - Date.parse(card.created_at) < 20 * 60_000;
 
   return (
     <ThemedView style={styles.container}>
@@ -67,6 +73,8 @@ export default function CardScreen() {
 
         <ReelLink cardId={card.id} url={card.source_url} onChange={(url) => setCard({ ...card, source_url: url })} />
         <Warnings warnings={data.warnings} />
+        <FrameGallery frames={card.frames} pending={framesPending} />
+        <VisualBlock visual={data.visual} />
         <KeyPoints points={data.key_points} />
         <ActionItems items={data.action_items} />
         <CategorySections data={data} />
