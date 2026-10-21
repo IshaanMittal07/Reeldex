@@ -4,7 +4,8 @@ type JSONSchema = z.core.JSONSchema.JSONSchema;
 
 // Card schema (plan Section 5.3). Written as JSON Schema because that is what
 // Gemini structured output takes; the Zod validator is derived from it so the
-// two can never drift apart. Sprint 0 covers the base + resume + cold_dm.
+// two can never drift apart. Sprint 0 covers the base + resume + cold_dm;
+// v2 adds key_frames (cut from the video by ffmpeg) and an app-drawn visual.
 
 export const CATEGORIES = [
   'resume',
@@ -87,6 +88,38 @@ const coldDm: JSONSchema = {
   required: ['templates', 'follow_up_rules', 'personalization_slots'],
 };
 
+const keyFrame: JSONSchema = {
+  type: 'object',
+  properties: {
+    timestamp: { type: 'string', description: 'mm:ss of the exact moment to capture, when the screen is clear and still.' },
+    caption: { type: 'string', description: 'What the frame shows, in a few words.' },
+    why: { type: 'string', description: 'Why seeing it helps more than reading it.' },
+  },
+  required: ['timestamp', 'caption', 'why'],
+};
+
+const visual: JSONSchema = {
+  type: ['object', 'null'],
+  description:
+    'A table or step flow the app will draw so the advice is easier to use. Only values from the video. null if nothing fits.',
+  properties: {
+    kind: { type: 'string', enum: ['table', 'flow'] },
+    title: str,
+    columns: { ...strList, description: 'table: header cells. flow: empty.' },
+    rows: { type: 'array', items: strList, description: 'table: one cell per column per row. flow: empty.' },
+    steps: {
+      type: 'array',
+      description: 'flow: ordered steps. table: empty.',
+      items: {
+        type: 'object',
+        properties: { label: str, detail: strOrNull },
+        required: ['label', 'detail'],
+      },
+    },
+  },
+  required: ['kind', 'title', 'columns', 'rows', 'steps'],
+};
+
 export const cardJsonSchema: JSONSchema = {
   type: 'object',
   properties: {
@@ -101,6 +134,8 @@ export const cardJsonSchema: JSONSchema = {
     creator_handle: strOrNull,
     action_items: strList,
     warnings: strList,
+    key_frames: { type: 'array', items: keyFrame, maxItems: 4 },
+    visual,
     resume,
     cold_dm: coldDm,
   },
@@ -116,6 +151,8 @@ export const cardJsonSchema: JSONSchema = {
     'creator_handle',
     'action_items',
     'warnings',
+    'key_frames',
+    'visual',
     'resume',
     'cold_dm',
   ],
