@@ -23,7 +23,11 @@ Shortcuts → **+** → name it **Reeldex**. Turn on **Show in Share Sheet**
 |---|---|---|
 | 1 | Receive input from Share Sheet | Types: **Media**, **Files**. If there's no input: **Ask For → Photos** |
 | 2 | Encode Media | Shortcut Input, Size **1280×720** |
-| 3 | Get Contents of URL | `https://<project-ref>.supabase.co/functions/v1/ingest`, Method **POST**, Header `x-reeldex-token: rdx_…`, Request Body **File** = *Encoded Media* |
+| 2a | Get Clipboard | |
+| 2b | Match Text | Pattern `https://(www\.)?instagram\.com/\S+` in *Clipboard* |
+| 2c | Get Item from List | **First Item** from *Matches* |
+| 2d | URL Encode | **Encode** *Item from List* |
+| 3 | Get Contents of URL | `https://<project-ref>.supabase.co/functions/v1/ingest?url=` + *URL Encoded Text*, Method **POST**, Header `x-reeldex-token: rdx_…`, Request Body **File** = *Encoded Media* |
 | 4 | Get Dictionary Value | Value for key `job_id` in *Contents of URL* |
 | 5 | If | *Dictionary Value* **has any value** |
 | 6 | Show Notification (inside If) | `Saved to Reeldex ✓ Card ready in about a minute` |
@@ -31,8 +35,11 @@ Shortcuts → **+** → name it **Reeldex**. Turn on **Show in Share Sheet**
 
 ## 3. Use it
 
-Instagram → reel → Share → **Download** (saves to Photos). Photos → the video →
-Share → **Reeldex**. The first run asks to connect to `supabase.co`: **Always Allow**.
+Instagram → reel → Share → **Copy link**, then Share → **Download** (saves to
+Photos). Photos → the video → Share → **Reeldex**. Steps 2a–2d send the copied
+link along, so the card links back to the reel. Only an instagram.com link is
+sent; anything else on the clipboard stays on the phone. No link copied? The
+card still saves, and you can paste the link on the card page later. The first run asks to connect to `supabase.co`: **Always Allow**.
 
 ## Responses
 
