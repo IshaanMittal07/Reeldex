@@ -51,6 +51,15 @@ async function userFromToken(token: string | null) {
   return data.user_id as string;
 }
 
+// Shortcuts often labels uploads application/octet-stream, so trust the bytes:
+// MP4 and MOV both start with an `ftyp` box; brand `qt  ` means QuickTime.
+function sniffMime(bytes: Uint8Array, declared: string) {
+  if (GEMINI_MIME[declared]) return declared;
+  const box = new TextDecoder().decode(bytes.subarray(4, 12));
+  if (!box.startsWith('ftyp')) return declared;
+  return box.slice(4) === 'qt  ' ? 'video/quicktime' : 'video/mp4';
+}
+
 async function readUpload(req: Request) {
   const params = new URL(req.url).searchParams;
   const type = req.headers.get('content-type') ?? '';
@@ -60,14 +69,14 @@ async function readUpload(req: Request) {
     if (!(video instanceof File)) return null;
     return {
       bytes: new Uint8Array(await video.arrayBuffer()),
-      mimeType: video.type || 'video/mp4',
+      mimeType: video.type,
       url: (form.get('url') as string | null) || params.get('url'),
       caption: (form.get('caption') as string | null) || params.get('caption'),
     };
   }
   return {
     bytes: new Uint8Array(await req.arrayBuffer()),
-    mimeType: type.split(';')[0] || 'video/mp4',
+    mimeType: type.split(';')[0],
     url: params.get('url'),
     caption: params.get('caption'),
   };
@@ -79,6 +88,7 @@ async function handleUpload(req: Request) {
 
   const upload = await readUpload(req);
   if (!upload || upload.bytes.byteLength === 0) return json({ error: 'No video in request' }, 400);
+  upload.mimeType = sniffMime(upload.bytes, upload.mimeType);
   if (upload.bytes.byteLength > MAX_BYTES) return json({ error: 'Video is over 50 MB' }, 413);
   if (!GEMINI_MIME[upload.mimeType]) return json({ error: `Unsupported type ${upload.mimeType}` }, 415);
 
