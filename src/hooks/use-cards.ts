@@ -42,15 +42,24 @@ export function useCard(id: string) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    supabase
-      .from('cards')
-      .select(COLUMNS)
-      .eq('id', id)
-      .maybeSingle()
-      .then(({ data }) => {
-        setCard(data as Card | null);
-        setIsLoading(false);
-      });
+    const load = () =>
+      supabase
+        .from('cards')
+        .select(COLUMNS)
+        .eq('id', id)
+        .maybeSingle()
+        .then(({ data }) => {
+          setCard(data as Card | null);
+          setIsLoading(false);
+        });
+    // Live: frames are added to the card a minute or so after it's created.
+    const channel = supabase
+      .channel(`card-${id}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'cards', filter: `id=eq.${id}` }, load)
+      .subscribe(() => load());
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [id]);
 
   return { card, isLoading, setCard };
