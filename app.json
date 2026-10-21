@@ -55,6 +55,30 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "build": {
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "targetName": "Reeldex",
+                  "bundleIdentifier": "app.reeldex.share-extension",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.app.reeldex"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "projectId": "69f076bc-f3dc-4c3c-aec8-290e8faa4ae9"
+      }
+    },
+    "owner": "ishaanmittal07"
   }
 }
