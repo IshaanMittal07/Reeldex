@@ -86,7 +86,7 @@ export default function LibraryScreen() {
               <ThemedText themeColor="textSecondary" style={styles.empty}>
                 {cards.length
                   ? 'Nothing matches.'
-                  : 'No cards yet. Download a reel in Instagram, then share it from Photos to the Reeldex Shortcut.'}
+                  : 'No cards yet. In Instagram, tap Download on a reel, then Share → Reeldex.'}
               </ThemedText>
             )
           }
