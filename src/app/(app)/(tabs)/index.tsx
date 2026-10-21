@@ -10,6 +10,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useCards } from '@/hooks/use-cards';
+import { useFrameUrls } from '@/hooks/use-frame-urls';
 import { useOpenJobs } from '@/hooks/use-open-jobs';
 import type { Card, Category } from '@/lib/types';
 
@@ -36,6 +37,7 @@ export default function LibraryScreen() {
   const [query, setQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
 
+  const thumbs = useFrameUrls(cards.flatMap((c) => (c.frames[0] ? [c.frames[0].path] : [])));
   const categories = useMemo(() => [...new Set(cards.map((c) => c.category))], [cards]);
   const visible = cards.filter(
     (c) => (!category || c.category === category) && (!query.trim() || matches(c, query.trim())),
@@ -47,7 +49,9 @@ export default function LibraryScreen() {
         <FlatList
           data={visible}
           keyExtractor={(c) => c.id}
-          renderItem={({ item }) => <CardRow card={item} />}
+          renderItem={({ item }) => (
+            <CardRow card={item} thumbUrl={item.frames[0] && thumbs[item.frames[0].path]} />
+          )}
           contentContainerStyle={styles.list}
           refreshControl={
             <RefreshControl
@@ -62,7 +66,12 @@ export default function LibraryScreen() {
           ListHeaderComponent={
             <View style={styles.header}>
               <ThemedText type="subtitle">Library</ThemedText>
-              <TextField placeholder="Search your reels" value={query} onChangeText={setQuery} clearButtonMode="while-editing" />
+              <TextField
+                placeholder="Search your reels"
+                value={query}
+                onChangeText={setQuery}
+                clearButtonMode="while-editing"
+              />
               {categories.length > 1 && (
                 <CategoryChips categories={categories} selected={category} onSelect={setCategory} />
               )}
