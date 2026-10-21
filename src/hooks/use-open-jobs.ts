@@ -19,11 +19,11 @@ export function useOpenJobs() {
   }, []);
 
   useEffect(() => {
-    refresh();
+    // Load once the channel settles (or fails), so no change slips in between.
     const channel = supabase
       .channel('jobs')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, () => refresh())
-      .subscribe();
+      .subscribe(() => refresh());
     return () => {
       supabase.removeChannel(channel);
     };

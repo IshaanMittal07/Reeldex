@@ -24,11 +24,11 @@ export function useCards() {
   }, []);
 
   useEffect(() => {
-    refresh();
+    // Load once the channel settles (or fails), so no change slips in between.
     const channel = supabase
       .channel('cards')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cards' }, () => refresh())
-      .subscribe();
+      .subscribe(() => refresh());
     return () => {
       supabase.removeChannel(channel);
     };
