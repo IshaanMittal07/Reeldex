@@ -6,10 +6,10 @@ import { ThemedText } from './themed-text';
 
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { CATEGORY_LABELS, type Card, type Category } from '@/lib/types';
+import type { Card, Category } from '@/lib/types';
 
-// Shown on the cover until the reel's frames are captured.
-const CATEGORY_GLYPHS: Record<Category, string> = {
+// Shown in place of the thumbnail until the reel's frames are captured.
+export const CATEGORY_GLYPHS: Record<Category, string> = {
   resume: '📄',
   applying: '📨',
   cold_dm: '💬',
@@ -26,118 +26,117 @@ function relativeDate(iso: string) {
   const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
   if (days < 1) return 'Today';
   if (days === 1) return 'Yesterday';
-  if (days < 7) return `${days} days ago`;
+  if (days < 7) return `${days}d`;
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-export function CardRow({ card, thumbUrl }: { card: Card; thumbUrl?: string }) {
+type Props = { card: Card; thumbUrl?: string; isFirst: boolean; isLast: boolean };
+
+// One compact line in a category group: thumbnail, title, one-line summary.
+// Rows in a group join into a single paper card split by hairlines.
+export function CardRow({ card, thumbUrl, isFirst, isLast }: Props) {
   const theme = useTheme();
-  const meta = [card.creator_handle, relativeDate(card.created_at)].filter(Boolean).join('  ·  ');
 
   return (
     <Link href={{ pathname: '/card/[id]', params: { id: card.id } }} asChild>
       <Pressable
         style={({ pressed }) => [
           styles.row,
-          { backgroundColor: theme.surface, borderColor: theme.border },
-          pressed && { backgroundColor: theme.backgroundElement, transform: [{ scale: 0.99 }] },
+          { backgroundColor: pressed ? theme.backgroundElement : theme.surface, borderColor: theme.border },
+          isFirst && styles.first,
+          isLast && styles.last,
+          !isFirst && { borderTopWidth: 0 },
         ]}>
-        <View style={[styles.cover, { backgroundColor: theme.accentSoft }]}>
+        <View style={[styles.thumb, { backgroundColor: theme.accentSoft }]}>
           {thumbUrl ? (
             <Image source={thumbUrl} style={StyleSheet.absoluteFill} contentFit="cover" transition={200} />
           ) : (
             <ThemedText style={styles.glyph}>{CATEGORY_GLYPHS[card.category] ?? '📌'}</ThemedText>
           )}
-          {/* Hairline inner edge so pale frames don't bleed into the card. */}
-          <View style={[styles.coverEdge, { borderColor: theme.border }]} pointerEvents="none" />
         </View>
 
-        <View style={styles.text}>
-          <View style={styles.topLine}>
-            <ThemedText type="eyebrow" themeColor="accent" numberOfLines={1} style={styles.category}>
-              {CATEGORY_LABELS[card.category] ?? card.category}
+        <View style={[styles.text, !isLast && { borderBottomColor: theme.border }, !isLast && styles.divider]}>
+          <View style={styles.titleLine}>
+            {card.pinned && <View style={[styles.pin, { backgroundColor: theme.accent }]} />}
+            <ThemedText numberOfLines={1} style={styles.title}>
+              {card.title}
             </ThemedText>
-            {card.pinned && (
-              <View style={[styles.pin, { backgroundColor: theme.accentSoft }]}>
-                <ThemedText type="eyebrow" themeColor="accent" style={styles.pinText}>
-                  Pinned
-                </ThemedText>
-              </View>
-            )}
+            <ThemedText type="small" themeColor="textTertiary" style={styles.date}>
+              {relativeDate(card.created_at)}
+            </ThemedText>
           </View>
-          <ThemedText type="heading" numberOfLines={3} style={styles.title}>
-            {card.title}
-          </ThemedText>
           {card.summary && (
-            <ThemedText type="small" themeColor="textSecondary" numberOfLines={2}>
+            <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
               {card.summary}
             </ThemedText>
           )}
-          <ThemedText type="small" themeColor="textTertiary" numberOfLines={1} style={styles.meta}>
-            {meta}
-          </ThemedText>
         </View>
       </Pressable>
     </Link>
   );
 }
 
-const COVER_WIDTH = 92;
+const THUMB = 44;
 
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
-    gap: Spacing.three,
-    padding: Spacing.two + Spacing.one,
-    borderRadius: Radius.large,
-    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    gap: Spacing.three - Spacing.one,
+    paddingLeft: Spacing.three - Spacing.one,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderRightWidth: StyleSheet.hairlineWidth,
   },
-  cover: {
-    width: COVER_WIDTH,
-    aspectRatio: 3 / 4,
-    alignSelf: 'flex-start',
-    borderRadius: Radius.medium,
+  first: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopLeftRadius: Radius.large,
+    borderTopRightRadius: Radius.large,
+  },
+  last: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomLeftRadius: Radius.large,
+    borderBottomRightRadius: Radius.large,
+  },
+  thumb: {
+    width: THUMB,
+    height: THUMB,
+    borderRadius: Radius.small + 2,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  coverEdge: {
-    ...StyleSheet.absoluteFill,
-    borderRadius: Radius.medium,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
   glyph: {
-    fontSize: 30,
-    lineHeight: 36,
+    fontSize: 20,
+    lineHeight: 26,
   },
+  // The divider starts after the thumbnail, like iOS and Notion lists.
   text: {
     flex: 1,
-    gap: Spacing.one,
-    paddingVertical: Spacing.half,
-    paddingRight: Spacing.one,
+    gap: Spacing.half,
+    paddingVertical: Spacing.two + Spacing.one,
+    paddingRight: Spacing.three - Spacing.one,
   },
-  topLine: {
+  divider: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  titleLine: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.two,
   },
-  category: {
-    flexShrink: 1,
-  },
   pin: {
-    paddingHorizontal: Spacing.two,
-    borderRadius: Radius.pill,
-  },
-  pinText: {
-    fontSize: 10,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   title: {
-    fontSize: 18,
-    lineHeight: 23,
+    flex: 1,
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: 600,
   },
-  meta: {
+  date: {
     fontSize: 12,
     lineHeight: 16,
-    marginTop: Spacing.half,
   },
 });

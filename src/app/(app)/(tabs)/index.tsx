@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, RefreshControl, SectionList, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CardRow } from '@/components/card-row';
@@ -15,7 +15,7 @@ import { useCards } from '@/hooks/use-cards';
 import { useFrameUrls } from '@/hooks/use-frame-urls';
 import { useOpenJobs } from '@/hooks/use-open-jobs';
 import { useTheme } from '@/hooks/use-theme';
-import type { Card, Category } from '@/lib/types';
+import { CATEGORY_LABELS, type Card, type Category } from '@/lib/types';
 
 function matches(card: Card, query: string) {
   const haystack = [
@@ -54,15 +54,35 @@ export default function LibraryScreen() {
   const visible = cards.filter(
     (c) => (!category || c.category === category) && (!query.trim() || matches(c, query.trim())),
   );
+  // One group per category, the most recently used category first (cards come newest first).
+  const groups = new Map<Category, Card[]>();
+  for (const card of visible) groups.set(card.category, [...(groups.get(card.category) ?? []), card]);
+  const sections = [...groups].map(([key, data]) => ({ key, data }));
 
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView edges={['top']} style={styles.safeArea}>
-        <FlatList
-          data={visible}
+        <SectionList
+          sections={sections}
           keyExtractor={(c) => c.id}
-          renderItem={({ item }) => (
-            <CardRow card={item} thumbUrl={item.frames[0] && thumbs[item.frames[0].path]} />
+          stickySectionHeadersEnabled={false}
+          renderItem={({ item, index, section }) => (
+            <CardRow
+              card={item}
+              thumbUrl={item.frames[0] && thumbs[item.frames[0].path]}
+              isFirst={index === 0}
+              isLast={index === section.data.length - 1}
+            />
+          )}
+          renderSectionHeader={({ section }) => (
+            <View style={styles.sectionHeader}>
+              <ThemedText type="eyebrow" themeColor="textSecondary">
+                {CATEGORY_LABELS[section.key] ?? section.key}
+              </ThemedText>
+              <ThemedText type="eyebrow" themeColor="textTertiary">
+                {section.data.length}
+              </ThemedText>
+            </View>
           )}
           contentContainerStyle={styles.list}
           refreshControl={
@@ -85,7 +105,7 @@ export default function LibraryScreen() {
                 </ThemedText>
               </View>
               <View style={styles.intro}>
-                <ThemedText type="subtitle">{greeting()}</ThemedText>
+                <ThemedText type="heading">{greeting()}</ThemedText>
                 <ThemedText type="small" themeColor="textSecondary">
                   {cards.length
                     ? `${cards.length} reel${cards.length > 1 ? 's' : ''} saved as notes.`
@@ -131,7 +151,6 @@ const styles = StyleSheet.create({
     maxWidth: MaxContentWidth,
   },
   list: {
-    gap: Spacing.two + Spacing.one,
     padding: Spacing.three,
     paddingTop: Spacing.two,
     paddingBottom: BottomTabInset + Spacing.three,
@@ -151,8 +170,15 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
   },
   intro: {
-    gap: Spacing.one,
-    marginTop: Spacing.three,
+    gap: Spacing.half,
+    marginTop: Spacing.two,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: Spacing.one,
+    paddingTop: Spacing.four,
+    paddingBottom: Spacing.two,
   },
   loading: {
     marginTop: Spacing.five,
