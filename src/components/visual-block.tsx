@@ -1,11 +1,11 @@
 import { ScrollView, StyleSheet, View } from 'react-native';
 
-import { Section } from './card-sections';
+import { CardSection } from './card-sections';
 import { CopyButton } from './copy-button';
 import { ThemedText } from './themed-text';
 import { ThemedView } from './themed-view';
 
-import { Spacing } from '@/constants/theme';
+import { Fonts, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { Visual } from '@/lib/types';
 
@@ -21,72 +21,87 @@ export function VisualBlock({ visual }: { visual?: Visual | null }) {
 function Table({ visual }: { visual: Visual }) {
   const theme = useTheme();
   const asText = [visual.columns, ...visual.rows].map((r) => r.join('\t')).join('\n');
+  // Two columns fit a phone screen without scrolling; more scroll sideways.
+  const cellWidth = visual.columns.length <= 2 ? 160 : 132;
   return (
-    <Section title={visual.title}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        <ThemedView type="backgroundElement" style={styles.table}>
-          {[visual.columns, ...visual.rows].map((row, r) => (
-            <View
-              key={r}
-              style={[styles.tr, r > 0 && { borderTopColor: theme.backgroundSelected, borderTopWidth: 1 }]}>
-              {visual.columns.map((_, c) => (
-                <ThemedText
-                  key={c}
-                  type={r === 0 ? 'smallBold' : 'small'}
-                  themeColor={r === 0 ? 'textSecondary' : 'text'}
-                  style={styles.td}>
-                  {row[c] ?? ''}
-                </ThemedText>
-              ))}
-            </View>
-          ))}
-        </ThemedView>
-      </ScrollView>
-      <CopyButton text={asText} label="Copy table" />
-    </Section>
+    <CardSection title={visual.title} action={<CopyButton text={asText} label="Copy" />}>
+      <View style={[styles.tableFrame, { borderColor: theme.border, backgroundColor: theme.surface }]}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View>
+            {[visual.columns, ...visual.rows].map((row, r) => (
+              <View
+                key={r}
+                style={[
+                  styles.tr,
+                  r === 0 && { backgroundColor: theme.backgroundElement },
+                  r > 0 && { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth },
+                ]}>
+                {visual.columns.map((_, c) => (
+                  <ThemedText
+                    key={c}
+                    type={r === 0 ? 'eyebrow' : 'small'}
+                    themeColor={r === 0 ? 'textSecondary' : 'text'}
+                    style={[styles.td, { width: cellWidth }, c === 0 && r > 0 && styles.firstCol]}>
+                    {row[c] ?? ''}
+                  </ThemedText>
+                ))}
+              </View>
+            ))}
+          </View>
+        </ScrollView>
+      </View>
+    </CardSection>
   );
 }
 
 function Flow({ visual }: { visual: Visual }) {
   const theme = useTheme();
   return (
-    <Section title={visual.title}>
-      {visual.steps.map((step, i) => (
-        <View key={i} style={styles.step}>
-          <View style={styles.rail}>
-            <View style={[styles.dot, { backgroundColor: theme.accent }]}>
-              <ThemedText type="smallBold" style={styles.dotText}>
-                {i + 1}
-              </ThemedText>
+    <CardSection title={visual.title}>
+      <View>
+        {visual.steps.map((step, i) => {
+          const last = i === visual.steps.length - 1;
+          return (
+            <View key={i} style={styles.step}>
+              <View style={styles.rail}>
+                <ThemedView type="accentSoft" style={[styles.dot, { borderColor: theme.accent }]}>
+                  <ThemedText themeColor="accent" style={styles.dotText}>
+                    {i + 1}
+                  </ThemedText>
+                </ThemedView>
+                {!last && <View style={[styles.line, { backgroundColor: theme.border }]} />}
+              </View>
+              <View style={[styles.stepBody, last && styles.stepBodyLast]}>
+                <ThemedText style={styles.stepLabel}>{step.label}</ThemedText>
+                {step.detail && (
+                  <ThemedText type="small" themeColor="textSecondary">
+                    {step.detail}
+                  </ThemedText>
+                )}
+              </View>
             </View>
-            {i < visual.steps.length - 1 && <View style={[styles.line, { backgroundColor: theme.backgroundSelected }]} />}
-          </View>
-          <View style={styles.stepBody}>
-            <ThemedText style={styles.stepLabel}>{step.label}</ThemedText>
-            {step.detail && (
-              <ThemedText type="small" themeColor="textSecondary">
-                {step.detail}
-              </ThemedText>
-            )}
-          </View>
-        </View>
-      ))}
-    </Section>
+          );
+        })}
+      </View>
+    </CardSection>
   );
 }
 
 const styles = StyleSheet.create({
-  table: {
-    borderRadius: Spacing.three,
-    paddingHorizontal: Spacing.two,
+  tableFrame: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.medium,
+    overflow: 'hidden',
   },
   tr: {
     flexDirection: 'row',
   },
   td: {
-    width: 130,
-    paddingVertical: Spacing.two,
-    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.two + Spacing.one,
+    paddingHorizontal: Spacing.three - Spacing.one,
+  },
+  firstCol: {
+    fontWeight: 600,
   },
   step: {
     flexDirection: 'row',
@@ -95,27 +110,37 @@ const styles = StyleSheet.create({
   rail: {
     alignItems: 'center',
   },
+  // Serif numerals in a pale green ring: the card's "numbered steps" look.
   dot: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
   dotText: {
-    color: '#fff',
+    fontFamily: Fonts.serif,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: 600,
   },
   line: {
-    width: 2,
+    width: StyleSheet.hairlineWidth * 2,
     flex: 1,
     minHeight: Spacing.three,
+    marginVertical: Spacing.one,
   },
   stepBody: {
     flex: 1,
     gap: Spacing.half,
-    paddingBottom: Spacing.three,
+    paddingTop: Spacing.half,
+    paddingBottom: Spacing.four,
+  },
+  stepBodyLast: {
+    paddingBottom: 0,
   },
   stepLabel: {
-    fontWeight: 700,
+    fontWeight: 600,
   },
 });
