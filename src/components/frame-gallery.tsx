@@ -1,98 +1,107 @@
 import { Image } from 'expo-image';
-import { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { Section } from './card-sections';
+import { CardSection, TimestampPill } from './card-sections';
 import { ThemedText } from './themed-text';
 import { ThemedView } from './themed-view';
 
-import { Spacing } from '@/constants/theme';
-import { useFrameUrls } from '@/hooks/use-frame-urls';
+import { Radius, Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 import type { Frame } from '@/lib/types';
 
-// Frames cut from the reel at the moments Gemini picked. Tap one to see it
-// full screen.
-export function FrameGallery({ frames, pending }: { frames: Frame[]; pending?: boolean }) {
-  const urls = useFrameUrls(frames.map((f) => f.path));
-  const [open, setOpen] = useState<Frame | null>(null);
+type Props = {
+  frames: Frame[];
+  urls: Record<string, string>;
+  pending?: boolean;
+  onOpen: (index: number) => void;
+};
+
+const TILE_WIDTH = 132;
+
+// Frames cut from the reel at the moments Gemini picked, as a filmstrip. Tap
+// one to see it full screen.
+export function FrameGallery({ frames, urls, pending, onOpen }: Props) {
+  const theme = useTheme();
 
   if (!frames.length) {
     return pending ? (
-      <Section title="From the reel">
-        <ThemedText type="small" themeColor="textSecondary">
-          Cutting frames from the video… they&apos;ll show up here in a minute.
-        </ThemedText>
-      </Section>
+      <CardSection title="From the reel">
+        <View style={[styles.pending, { borderColor: theme.border }]}>
+          <ThemedText type="small" themeColor="textSecondary">
+            Cutting frames from the video… they&apos;ll show up here in a minute.
+          </ThemedText>
+        </View>
+      </CardSection>
     ) : null;
   }
 
   return (
-    <Section title="From the reel">
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
-        {frames.map((frame) => (
-          <Pressable key={frame.path} onPress={() => setOpen(frame)} accessibilityRole="imagebutton" accessibilityLabel={frame.caption}>
-            <ThemedView type="backgroundElement" style={styles.tile}>
+    <CardSection title="From the reel">
+      {/* Bleeds into the page gutter so the strip scrolls edge to edge. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.strip}
+        contentContainerStyle={styles.row}>
+        {frames.map((frame, i) => (
+          <Pressable
+            key={frame.path}
+            onPress={() => onOpen(i)}
+            accessibilityRole="imagebutton"
+            accessibilityLabel={frame.caption}
+            style={({ pressed }) => [styles.tile, pressed && styles.pressed]}>
+            <ThemedView type="backgroundElement" style={[styles.thumbFrame, { borderColor: theme.border }]}>
               <Image source={urls[frame.path]} style={styles.thumb} contentFit="cover" transition={150} />
-              <View style={styles.caption}>
-                <ThemedText type="code" themeColor="textSecondary">
-                  {frame.timestamp}
-                </ThemedText>
-                <ThemedText type="small" numberOfLines={2}>
-                  {frame.caption}
-                </ThemedText>
+              <View style={styles.stamp}>
+                <TimestampPill value={frame.timestamp} />
               </View>
             </ThemedView>
+            {!!frame.caption && (
+              <ThemedText type="small" themeColor="textSecondary" numberOfLines={3}>
+                {frame.caption}
+              </ThemedText>
+            )}
           </Pressable>
         ))}
       </ScrollView>
-
-      <Modal visible={!!open} transparent animationType="fade" onRequestClose={() => setOpen(null)}>
-        <Pressable style={styles.backdrop} onPress={() => setOpen(null)} accessibilityLabel="Close">
-          {open && (
-            <>
-              <Image source={urls[open.path]} style={styles.full} contentFit="contain" />
-              <ThemedText style={styles.fullCaption}>
-                {open.timestamp} · {open.caption}
-              </ThemedText>
-            </>
-          )}
-        </Pressable>
-      </Modal>
-    </Section>
+    </CardSection>
   );
 }
 
 const styles = StyleSheet.create({
+  pending: {
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderRadius: Radius.medium,
+    padding: Spacing.three,
+  },
+  strip: {
+    marginHorizontal: -Spacing.three,
+  },
   row: {
-    gap: Spacing.two,
+    gap: Spacing.three - Spacing.one,
+    paddingHorizontal: Spacing.three,
   },
   tile: {
-    width: 160,
-    borderRadius: Spacing.three,
+    width: TILE_WIDTH,
+    gap: Spacing.two,
+  },
+  thumbFrame: {
+    borderRadius: Radius.medium,
+    borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
   },
+  // Reels are 9:16.
   thumb: {
-    width: 160,
-    height: 284,
+    width: TILE_WIDTH,
+    aspectRatio: 9 / 16,
   },
-  caption: {
-    gap: Spacing.half,
-    padding: Spacing.two,
+  stamp: {
+    position: 'absolute',
+    left: Spacing.two,
+    bottom: Spacing.two,
   },
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.92)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: Spacing.three,
-    gap: Spacing.three,
-  },
-  full: {
-    width: '100%',
-    flex: 1,
-  },
-  fullCaption: {
-    color: '#fff',
-    textAlign: 'center',
+  pressed: {
+    opacity: 0.75,
   },
 });
