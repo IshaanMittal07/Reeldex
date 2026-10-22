@@ -208,13 +208,16 @@ async function processJob(jobId: string, bytes?: Uint8Array) {
     if (cardError || !saved) throw new Error(`Cards: ${cardError?.message}`);
 
     // Frames to cut: keep the video for the Actions job, which deletes it when done.
-    if (card.key_frames?.length && (await dispatchFrames(jobId))) {
+    const framesError = card.key_frames?.length ? await dispatchFrames(jobId) : 'no key frames';
+    if (!framesError) {
       await db
         .from('jobs')
         .update({ status: 'done', error: null, frames_status: 'pending', updated_at: new Date().toISOString() })
         .eq('id', jobId);
     } else {
-      await finish(jobId, job.video_path, { status: 'done', error: null });
+      // The card is done either way; keep the dispatch reason so a silent failure is visible.
+      const error = card.key_frames?.length ? framesError : null;
+      await finish(jobId, job.video_path, { status: 'done', error });
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
