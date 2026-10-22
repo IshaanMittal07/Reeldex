@@ -11,6 +11,7 @@ import { cardJsonSchema, cardSchema } from '../../../shared/schemas/card.ts';
 import { reelUrl } from '../../../shared/reel-url.ts';
 import { deleteFile, extract, RateLimitError, uploadFile, waitUntilActive } from './gemini.ts';
 import { dispatchFrames } from './github.ts';
+import { fetchCaption } from './instagram.ts';
 
 const PROMPT_VERSION = 'extract.v2';
 const MAX_ATTEMPTS = 3;
@@ -169,6 +170,12 @@ async function processJob(jobId: string, bytes?: Uint8Array) {
     let file = await uploadFile(bytes, mimeType, jobId);
     geminiFile = file.name;
     file = await waitUntilActive(file);
+
+    // The Shortcut only sends the link, so read the caption (often the full recipe) ourselves.
+    if (!job.caption && job.source_url) {
+      job.caption = await fetchCaption(job.source_url);
+      if (job.caption) await db.from('jobs').update({ caption: job.caption }).eq('id', jobId);
+    }
 
     const prompt = (await promptTemplate).replace('{caption}', job.caption ?? '');
     const primary = Deno.env.get('GEMINI_MODEL')!;
