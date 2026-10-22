@@ -2,7 +2,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { ActionItems, Callout, KeyPoints, Resources, Warnings } from '@/components/card-sections';
+import { ActionItems, Callout, KeyPoints, Resources, Takeaways, Warnings } from '@/components/card-sections';
 import { FrameViewer } from '@/components/card-frame-viewer';
 import { CardHero } from '@/components/card-hero';
 import { CategorySections } from '@/components/category-sections';
@@ -70,6 +70,7 @@ export default function CardScreen() {
           onOpenCover={() => setViewing(0)}
         />
         <ReelLink cardId={card.id} url={card.source_url} onChange={(url) => setCard({ ...card, source_url: url })} />
+        <Takeaways items={data.takeaways} />
 
         {!data.is_actionable && (
           <Callout label="Note">

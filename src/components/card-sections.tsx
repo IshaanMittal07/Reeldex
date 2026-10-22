@@ -95,6 +95,30 @@ export function Warnings({ warnings }: { warnings: string[] }) {
   );
 }
 
+// The reel boiled down, fluff removed: the first thing to read on the page.
+export function Takeaways({ items }: { items?: string[] }) {
+  const theme = useTheme();
+  if (!items?.length) return null;
+  return (
+    <View style={[styles.takeaways, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+      <View style={styles.cardSectionHeader}>
+        <ThemedText type="eyebrow" themeColor="accent" style={styles.flex}>
+          Key takeaways
+        </ThemedText>
+        <CopyButton text={items.map((t) => `• ${t}`).join('\n')} />
+      </View>
+      <View style={styles.list}>
+        {items.map((text, i) => (
+          <View key={i} style={styles.takeawayRow}>
+            <View style={[styles.takeawayDot, { backgroundColor: theme.accent }]} />
+            <ThemedText style={styles.flex}>{text}</ThemedText>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 export function KeyPoints({ points }: { points: KeyPoint[] }) {
   if (!points.length) return null;
   return (
@@ -207,6 +231,24 @@ export function Resources({ resources }: { resources: Resource[] }) {
 }
 
 const styles = StyleSheet.create({
+  takeaways: {
+    gap: Spacing.three - Spacing.one,
+    padding: Spacing.three,
+    borderRadius: Radius.large,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  takeawayRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.three - Spacing.one,
+  },
+  // Centred on the first line of text (lineHeight 25).
+  takeawayDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginTop: 10,
+  },
   section: {
     gap: Spacing.two,
   },

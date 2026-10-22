@@ -22,6 +22,7 @@ function matches(card: Card, query: string) {
     card.title,
     card.summary,
     card.creator_handle,
+    ...(card.data.takeaways ?? []),
     ...card.data.key_points.map((p) => p.text),
     ...card.data.action_items,
   ]

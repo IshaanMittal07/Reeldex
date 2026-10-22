@@ -62,7 +62,8 @@ export type CardData = {
   creator_handle: string | null;
   action_items: string[];
   warnings: string[];
-  // Optional: cards made before prompt v2 don't have them.
+  // Optional: cards made before prompt v2 (frames, visual) or v3 (takeaways) don't have them.
+  takeaways?: string[];
   key_frames?: KeyFrame[];
   visual?: Visual | null;
   resume: ResumeData | null;

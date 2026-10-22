@@ -5,7 +5,8 @@ type JSONSchema = z.core.JSONSchema.JSONSchema;
 // Card schema (plan Section 5.3). Written as JSON Schema because that is what
 // Gemini structured output takes; the Zod validator is derived from it so the
 // two can never drift apart. Sprint 0 covers the base + resume + cold_dm;
-// v2 adds key_frames (cut from the video by ffmpeg) and an app-drawn visual.
+// v2 adds key_frames (cut from the video by ffmpeg) and an app-drawn visual;
+// v3 adds takeaways, the reel boiled down with the fluff removed.
 
 export const CATEGORIES = [
   'resume',
@@ -129,6 +130,12 @@ export const cardJsonSchema: JSONSchema = {
     confidence: { type: 'number', minimum: 0, maximum: 1 },
     title: str,
     one_line_summary: str,
+    takeaways: {
+      ...strList,
+      minItems: 1,
+      maxItems: 6,
+      description: 'The substance of the reel in 2-6 short bullets, no filler.',
+    },
     key_points: { type: 'array', items: keyPoint },
     resources: { type: 'array', items: resource },
     creator_handle: strOrNull,
@@ -146,6 +153,7 @@ export const cardJsonSchema: JSONSchema = {
     'confidence',
     'title',
     'one_line_summary',
+    'takeaways',
     'key_points',
     'resources',
     'creator_handle',
