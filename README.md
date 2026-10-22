@@ -54,7 +54,7 @@ perks, fitness, food and more), and you can search all of them.
 
 ```
  Instagram ── Download ──▶ Photos ── Share ──▶ Reeldex Shortcut (iOS)
-                                                   │  shrinks to 720p,
+                                                   │  shrinks to 540p,
                                                    │  attaches the reel link
                                                    ▼
                                   Supabase Edge Function  `ingest`

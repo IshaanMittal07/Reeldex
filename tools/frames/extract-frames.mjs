@@ -56,7 +56,7 @@ try {
     const at = Math.max(0, Math.min(toSeconds(frame.timestamp), duration - 0.5));
     const out = join(dir, `${i}.jpg`);
     try {
-      execFileSync('ffmpeg', ['-v', 'error', '-ss', String(at), '-i', video, '-frames:v', '1', '-vf', 'scale=720:-2', '-q:v', '3', '-y', out]);
+      execFileSync('ffmpeg', ['-v', 'error', '-ss', String(at), '-i', video, '-frames:v', '1', '-vf', "scale='min(720,iw)':-2", '-q:v', '3', '-y', out]);
     } catch (err) {
       console.error(`Frame ${i} at ${frame.timestamp} failed:`, err.message);
       continue;
