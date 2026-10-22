@@ -86,7 +86,12 @@ async function readUpload(req: Request) {
 
 async function handleUpload(req: Request) {
   const userId = await userFromToken(req.headers.get('x-reeldex-token'));
-  if (!userId) return json({ error: 'Invalid or missing x-reeldex-token' }, 401);
+  if (!userId) {
+    // Read the unread video first: replying mid-upload stalls the connection and
+    // the Shortcut shows "network connection was lost" instead of this error.
+    await req.arrayBuffer().catch(() => {});
+    return json({ error: 'Invalid or missing x-reeldex-token' }, 401);
+  }
 
   const upload = await readUpload(req);
   if (!upload || upload.bytes.byteLength === 0) return json({ error: 'No video in request' }, 400);
