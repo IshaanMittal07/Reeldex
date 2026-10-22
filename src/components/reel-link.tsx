@@ -4,11 +4,11 @@ import { Linking, Pressable, StyleSheet, View } from 'react-native';
 import { CopyButton } from './copy-button';
 import { TextField } from './text-field';
 import { ThemedText } from './themed-text';
-import { ThemedView } from './themed-view';
 
 import { reelUrl } from '../../shared/reel-url';
 
-import { Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 import { supabase } from '@/lib/supabase';
 
 type Props = {
@@ -20,25 +20,24 @@ type Props = {
 // The reel's Instagram link: sent by the Shortcut when it can find one, or
 // pasted here for cards saved without it.
 export function ReelLink({ cardId, url, onChange }: Props) {
+  const theme = useTheme();
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   if (url) {
     return (
-      <ThemedView type="backgroundElement" style={styles.box}>
-        <ThemedText type="smallBold" themeColor="textSecondary">
-          REEL
-        </ThemedText>
-        <Pressable onPress={() => Linking.openURL(url)} accessibilityRole="link">
-          <ThemedText type="linkPrimary" numberOfLines={1}>
-            {url.replace('https://www.', '')}
+      <View style={styles.row}>
+        <Pressable
+          onPress={() => Linking.openURL(url)}
+          accessibilityRole="link"
+          style={({ pressed }) => [styles.watch, { backgroundColor: theme.accentSoft, borderColor: theme.accentSoft }, pressed && styles.pressed]}>
+          <ThemedText type="small" themeColor="accentStrong" style={styles.watchText}>
+            Watch the reel ↗
           </ThemedText>
         </Pressable>
-        <View style={styles.actions}>
-          <CopyButton text={url} label="Copy link" />
-        </View>
-      </ThemedView>
+        <CopyButton text={url} label="Copy link" />
+      </View>
     );
   }
 
@@ -53,10 +52,15 @@ export function ReelLink({ cardId, url, onChange }: Props) {
   }
 
   return (
-    <ThemedView type="backgroundElement" style={styles.box}>
-      <ThemedText type="smallBold" themeColor="textSecondary">
-        ADD THE REEL LINK
-      </ThemedText>
+    <View style={[styles.box, { borderColor: theme.border, backgroundColor: theme.surface }]}>
+      <View style={styles.boxHeader}>
+        <ThemedText type="eyebrow" themeColor="textSecondary">
+          Add the reel link
+        </ThemedText>
+        <ThemedText type="small" themeColor="textTertiary">
+          So you can jump back to the video later.
+        </ThemedText>
+      </View>
       <TextField
         placeholder="https://www.instagram.com/reel/…"
         autoCapitalize="none"
@@ -74,20 +78,50 @@ export function ReelLink({ cardId, url, onChange }: Props) {
           {error}
         </ThemedText>
       )}
-      <Pressable onPress={save} disabled={saving || !draft} accessibilityRole="button">
+      <Pressable
+        onPress={save}
+        disabled={saving || !draft}
+        accessibilityRole="button"
+        hitSlop={8}
+        style={(!draft || saving) && styles.dim}>
         <ThemedText type="linkPrimary">{saving ? 'Saving…' : 'Save link'}</ThemedText>
       </Pressable>
-    </ThemedView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  box: {
-    gap: Spacing.two,
-    padding: Spacing.three,
-    borderRadius: Spacing.three,
-  },
-  actions: {
+  row: {
     flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+  },
+  // Same height as the copy pill beside it.
+  watch: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.pill,
+    paddingVertical: Spacing.one,
+    paddingHorizontal: Spacing.three - Spacing.one,
+  },
+  watchText: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: 600,
+  },
+  pressed: {
+    opacity: 0.7,
+  },
+  box: {
+    gap: Spacing.three - Spacing.one,
+    padding: Spacing.three,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.medium,
+  },
+  boxHeader: {
+    gap: Spacing.half,
+  },
+  dim: {
+    opacity: 0.5,
   },
 });
