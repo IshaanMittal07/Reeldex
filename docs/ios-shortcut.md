@@ -25,7 +25,7 @@ Shortcuts → **+** → name it **Reeldex** → tap the name → **Details** →
 | 6 | Show Notification (inside If) | `Tap Download on the reel first, then share again.` |
 | 7 | Stop This Shortcut (inside If) | |
 | 8 | End If | (comes with step 5; leave the Otherwise branch empty or delete it) |
-| 9 | Encode Media | *Photos*, Size **960×540** (keeps reels up to ~3 min under 50 MB) |
+| 9 | Encode Media | *Photos*, Size **960×540** (videos up to 120 MB are accepted) |
 | 10 | URL Encode | **Encode** *Shortcut Input* |
 | 11 | Get Contents of URL | `https://<project-ref>.supabase.co/functions/v1/ingest?url=` + *URL Encoded Text*. Method **POST**. Header `x-reeldex-token: rdx_…`. Request Body **File** = *Encoded Media* |
 | 12 | Get Dictionary Value | Value for key `job_id` in *Contents of URL* |
@@ -56,6 +56,6 @@ follow a minute after that.
 | 202 `{job_id, status: "queued"}` | Accepted; the card appears in about a minute |
 | 200 `{duplicate: true}` | You already sent this exact video (a link is still added if the card had none) |
 | 401 | Token missing or wrong |
-| 413 | Over 50 MB (check Encode Media is on and set to 960×540) |
+| 413 | Over 120 MB (check Encode Media is on and set to 960×540) |
 | 415 | Not an MP4/MOV video |
 | 429 | Monthly quota used up |

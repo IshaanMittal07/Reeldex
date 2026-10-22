@@ -16,6 +16,10 @@ const db = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KE
 });
 
 // "mm:ss", "h:mm:ss" or plain seconds.
+// Matches the ingest function's part layout.
+const MAX_PARTS = 3;
+const partPath = (path, i) => (i === 0 ? path : `${path}.${i}`);
+
 function toSeconds(timestamp) {
   return String(timestamp)
     .split(':')
@@ -43,9 +47,17 @@ try {
 
   const dir = mkdtempSync(join(tmpdir(), 'frames-'));
   const video = join(dir, 'video');
-  const { data: blob, error: downloadError } = await db.storage.from('incoming').download(job.video_path);
-  if (downloadError) throw downloadError;
-  writeFileSync(video, Buffer.from(await blob.arrayBuffer()));
+  // Videos over 45 MB are stored in parts (<path>, <path>.1, ...); join them back up.
+  const parts = [];
+  for (let i = 0; i < MAX_PARTS; i++) {
+    const { data: blob, error } = await db.storage.from('incoming').download(partPath(job.video_path, i));
+    if (error) {
+      if (i === 0) throw error;
+      break;
+    }
+    parts.push(Buffer.from(await blob.arrayBuffer()));
+  }
+  writeFileSync(video, Buffer.concat(parts));
 
   const duration = Number(
     execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', video]),
@@ -76,7 +88,7 @@ try {
   console.log(`Saved ${frames.length} frame(s) for card ${card.id}`);
 } finally {
   // Always drop the video, even if cutting failed.
-  await db.storage.from('incoming').remove([job.video_path]);
+  await db.storage.from('incoming').remove(Array.from({ length: MAX_PARTS }, (_, i) => partPath(job.video_path, i)));
   await db
     .from('jobs')
     .update({ frames_status: frames.length ? 'done' : 'failed', video_path: null, updated_at: new Date().toISOString() })

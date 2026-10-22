@@ -15,8 +15,13 @@ import { fetchCaption } from './instagram.ts';
 
 const PROMPT_VERSION = 'extract.v2';
 const MAX_ATTEMPTS = 3;
-const MAX_BYTES = 50 * 1024 * 1024;
+// The whole video sits in memory (256 MB on the free plan), so stay well under that.
+const MAX_BYTES = 120 * 1024 * 1024;
 const BUCKET = 'incoming';
+// Free-plan Storage caps each file at 50 MB, so bigger videos are stored as
+// numbered parts: <path>, <path>.1, <path>.2 ...
+const PART_BYTES = 45 * 1024 * 1024;
+const MAX_PARTS = Math.ceil(MAX_BYTES / PART_BYTES);
 // Gemini names .mov as video/mov, iOS sends video/quicktime.
 const GEMINI_MIME: Record<string, string> = { 'video/mp4': 'video/mp4', 'video/quicktime': 'video/mov' };
 
@@ -85,6 +90,42 @@ async function readUpload(req: Request) {
   };
 }
 
+const partPath = (path: string, i: number) => (i === 0 ? path : `${path}.${i}`);
+
+async function storeVideo(path: string, bytes: Uint8Array, contentType: string) {
+  for (let i = 0; i * PART_BYTES < bytes.byteLength; i++) {
+    const part = new Blob([bytes.subarray(i * PART_BYTES, (i + 1) * PART_BYTES)], { type: contentType });
+    const { error } = await db.storage.from(BUCKET).upload(partPath(path, i), part, { contentType });
+    if (error) return error;
+  }
+  return null;
+}
+
+// Reads parts in order until the next one is missing.
+async function loadVideo(path: string) {
+  const parts: Uint8Array[] = [];
+  for (let i = 0; i < MAX_PARTS; i++) {
+    const { data, error } = await db.storage.from(BUCKET).download(partPath(path, i));
+    if (error || !data) {
+      if (i === 0) throw new Error(`Video missing from storage: ${error?.message}`);
+      break;
+    }
+    parts.push(new Uint8Array(await data.arrayBuffer()));
+  }
+  if (parts.length === 1) return parts[0];
+  const bytes = new Uint8Array(parts.reduce((n, p) => n + p.byteLength, 0));
+  let offset = 0;
+  for (const p of parts) {
+    bytes.set(p, offset);
+    offset += p.byteLength;
+  }
+  return bytes;
+}
+
+function removeVideo(path: string) {
+  return db.storage.from(BUCKET).remove(Array.from({ length: MAX_PARTS }, (_, i) => partPath(path, i)));
+}
+
 async function handleUpload(req: Request) {
   const userId = await userFromToken(req.headers.get('x-reeldex-token'));
   if (!userId) {
@@ -98,7 +139,10 @@ async function handleUpload(req: Request) {
   if (!upload || upload.bytes.byteLength === 0) return json({ error: 'No video in request' }, 400);
   upload.mimeType = sniffMime(upload.bytes, upload.mimeType);
   upload.url = reelUrl(upload.url);
-  if (upload.bytes.byteLength > MAX_BYTES) return json({ error: 'Video is over 50 MB' }, 413);
+  if (upload.bytes.byteLength > MAX_BYTES) {
+    const mb = (upload.bytes.byteLength / 1024 / 1024).toFixed(1);
+    return json({ error: `Video is ${mb} MB; the limit is ${MAX_BYTES / 1024 / 1024} MB` }, 413);
+  }
   if (!GEMINI_MIME[upload.mimeType]) return json({ error: `Unsupported type ${upload.mimeType}` }, 415);
 
   const videoHash = await sha256Hex(upload.bytes);
@@ -124,10 +168,11 @@ async function handleUpload(req: Request) {
 
   const jobId = crypto.randomUUID();
   const videoPath = `${userId}/${jobId}`;
-  const { error: storeError } = await db.storage
-    .from(BUCKET)
-    .upload(videoPath, upload.bytes, { contentType: upload.mimeType });
-  if (storeError) return json({ error: `Storage: ${storeError.message}` }, 500);
+  const storeError = await storeVideo(videoPath, upload.bytes, upload.mimeType);
+  if (storeError) {
+    await removeVideo(videoPath);
+    return json({ error: `Storage: ${storeError.message}` }, 500);
+  }
 
   const { error: jobError } = await db.from('jobs').insert({
     id: jobId,
@@ -160,11 +205,7 @@ async function processJob(jobId: string, bytes?: Uint8Array) {
 
   let geminiFile: string | undefined;
   try {
-    if (!bytes) {
-      const { data, error } = await db.storage.from(BUCKET).download(job.video_path);
-      if (error || !data) throw new Error(`Video missing from storage: ${error?.message}`);
-      bytes = new Uint8Array(await data.arrayBuffer());
-    }
+    bytes ??= await loadVideo(job.video_path);
 
     const mimeType = GEMINI_MIME[job.mime_type ?? 'video/mp4'] ?? 'video/mp4';
     let file = await uploadFile(bytes, mimeType, jobId);
@@ -235,7 +276,7 @@ async function processJob(jobId: string, bytes?: Uint8Array) {
 
 // Done or out of attempts: the video is never kept (plan Section 4).
 async function finish(jobId: string, videoPath: string | null, fields: { status: string; error: string | null }) {
-  if (videoPath) await db.storage.from(BUCKET).remove([videoPath]);
+  if (videoPath) await removeVideo(videoPath);
   await db
     .from('jobs')
     .update({ ...fields, video_path: null, updated_at: new Date().toISOString() })
@@ -273,7 +314,7 @@ async function sweep() {
     .eq('frames_status', 'pending')
     .lt('updated_at', framesBefore);
   for (const job of lostFrames ?? []) {
-    if (job.video_path) await db.storage.from(BUCKET).remove([job.video_path]);
+    if (job.video_path) await removeVideo(job.video_path);
     await db.from('jobs').update({ frames_status: 'failed', video_path: null }).eq('id', job.id);
   }
 
