@@ -11,9 +11,9 @@ import { cardJsonSchema, cardSchema } from '../../../shared/schemas/card.ts';
 import { reelUrl } from '../../../shared/reel-url.ts';
 import { deleteFile, extract, RateLimitError, uploadFile, waitUntilActive } from './gemini.ts';
 import { dispatchFrames } from './github.ts';
-import { fetchCaption } from './instagram.ts';
+import { downloadVideo, fetchCaption, fetchEmbed } from './instagram.ts';
 
-const PROMPT_VERSION = 'extract.v2';
+const PROMPT_VERSION = 'extract.v3';
 const MAX_ATTEMPTS = 3;
 // The whole video sits in memory (256 MB on the free plan), so stay well under that.
 const MAX_BYTES = 120 * 1024 * 1024;
@@ -25,7 +25,7 @@ const MAX_PARTS = Math.ceil(MAX_BYTES / PART_BYTES);
 // Gemini names .mov as video/mov, iOS sends video/quicktime.
 const GEMINI_MIME: Record<string, string> = { 'video/mp4': 'video/mp4', 'video/quicktime': 'video/mov' };
 
-const promptTemplate = Deno.readTextFile(new URL('../../../prompts/extract.v2.md', import.meta.url));
+const promptTemplate = Deno.readTextFile(new URL('../../../prompts/extract.v3.md', import.meta.url));
 
 function secretKey() {
   const keys = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? '{}') as Record<string, string>;
@@ -136,9 +136,37 @@ async function handleUpload(req: Request) {
   }
 
   const upload = await readUpload(req);
-  if (!upload || upload.bytes.byteLength === 0) return json({ error: 'No video in request' }, 400);
-  upload.mimeType = sniffMime(upload.bytes, upload.mimeType);
+  if (!upload) return json({ error: 'No video in request' }, 400);
   upload.url = reelUrl(upload.url);
+
+  // Link only (Shortcut v4): fetch the video from Instagram's public embed page.
+  // Shortcuts sends an empty JSON body ("{}") for a POST without a file.
+  if (upload.bytes.byteLength < 1024) {
+    upload.bytes = new Uint8Array();
+    if (!upload.url) return json({ error: 'Send a video or an Instagram reel link' }, 400);
+    const { data: seen } = await db
+      .from('jobs')
+      .select('id, status')
+      .eq('user_id', userId)
+      .eq('source_url', upload.url)
+      .neq('status', 'failed')
+      .limit(1)
+      .maybeSingle();
+    if (seen) return json({ job_id: seen.id, status: seen.status, duplicate: true });
+
+    const embed = await fetchEmbed(upload.url);
+    if (!embed.videoUrl) {
+      return json({ error: "Couldn't get this reel from Instagram (private or blocked). Tap Download, then share." }, 422);
+    }
+    try {
+      upload.bytes = await downloadVideo(embed.videoUrl, MAX_BYTES);
+    } catch (err) {
+      return json({ error: `Couldn't download the reel: ${err instanceof Error ? err.message : err}` }, 502);
+    }
+    upload.caption ||= embed.caption;
+  }
+
+  upload.mimeType = sniffMime(upload.bytes, upload.mimeType);
   if (upload.bytes.byteLength > MAX_BYTES) {
     const mb = (upload.bytes.byteLength / 1024 / 1024).toFixed(1);
     return json({ error: `Video is ${mb} MB; the limit is ${MAX_BYTES / 1024 / 1024} MB` }, 413);
