@@ -70,6 +70,8 @@ try {
     else frames.push({ path, timestamp: frame.timestamp, caption: frame.caption });
   }
 
+  // In video order, so frames[0] (the card's thumbnail) is the first one captured.
+  frames.sort((a, b) => toSeconds(a.timestamp) - toSeconds(b.timestamp));
   await db.from('cards').update({ frames }).eq('id', card.id);
   console.log(`Saved ${frames.length} frame(s) for card ${card.id}`);
 } finally {
