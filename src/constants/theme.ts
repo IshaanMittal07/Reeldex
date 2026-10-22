@@ -8,19 +8,20 @@ import '@/global.css';
 import { Platform } from 'react-native';
 
 export const Colors = {
+  // Soft, low-glare light mode: warm parchment page, off-white cards and
+  // softened ink instead of pure white on black.
   light: {
-    text: '#1B201C',
-    background: '#FAFAF7',
-    // Cards and sheets sit on the page as white paper.
-    surface: '#FFFFFF',
-    backgroundElement: '#F2F4EF',
-    backgroundSelected: '#E4ECE3',
-    border: '#E6E8E2',
-    textSecondary: '#5D665E',
-    textTertiary: '#8E968D',
-    accent: '#0E7C4A',
-    accentStrong: '#0A5C37',
-    accentSoft: '#E4F2E9',
+    text: '#262B26',
+    background: '#F4F3ED',
+    surface: '#FBFAF6',
+    backgroundElement: '#ECEBE4',
+    backgroundSelected: '#E1E7DD',
+    border: '#E1DFD6',
+    textSecondary: '#5F665E',
+    textTertiary: '#8D938A',
+    accent: '#16774A',
+    accentStrong: '#0F5A37',
+    accentSoft: '#E2EDE3',
     onAccent: '#FFFFFF',
     warning: '#B54708',
     warningBackground: '#FFF4E5',

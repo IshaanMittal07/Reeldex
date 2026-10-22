@@ -1,14 +1,26 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useColorScheme } from 'react-native';
+import { useEffect } from 'react';
+import { Platform } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
+import { Colors } from '@/constants/theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { SessionProvider, useSession } from '@/lib/session';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
+
+  // Web: paint the page behind the app (overscroll, status bar) to match.
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const background = Colors[colorScheme === 'dark' ? 'dark' : 'light'].background;
+    document.body.style.background = background;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', background);
+  }, [colorScheme]);
+
   return (
     <SessionProvider>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>

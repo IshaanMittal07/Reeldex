@@ -1,5 +1,5 @@
 import { Children, useState, type PropsWithChildren, type ReactNode } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CopyButton } from '@/components/copy-button';
@@ -8,6 +8,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { setAppearance, useAppearance, type Appearance } from '@/lib/appearance';
 import { useSession } from '@/lib/session';
 import { supabase } from '@/lib/supabase';
 
@@ -41,6 +42,12 @@ export default function SettingsScreen() {
                 Signed in as
               </ThemedText>
               <ThemedText numberOfLines={1}>{session?.user.email}</ThemedText>
+            </View>
+          </Group>
+
+          <Group label="Appearance">
+            <View style={styles.row}>
+              <AppearancePicker />
             </View>
           </Group>
 
@@ -116,6 +123,37 @@ function Group({ label, note, children }: PropsWithChildren<{ label?: string; no
   );
 }
 
+const APPEARANCES: { value: Appearance; label: string }[] = [
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+  { value: 'system', label: 'System' },
+];
+
+// Segmented control: the selected option sits on a raised paper chip.
+function AppearancePicker() {
+  const theme = useTheme();
+  const appearance = useAppearance();
+  return (
+    <View style={[styles.segments, { backgroundColor: theme.backgroundElement }]}>
+      {APPEARANCES.map(({ value, label }) => {
+        const selected = value === appearance;
+        return (
+          <Pressable
+            key={value}
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            onPress={() => setAppearance(value)}
+            style={[styles.segment, selected && { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <ThemedText type="smallBold" themeColor={selected ? 'text' : 'textSecondary'}>
+              {label}
+            </ThemedText>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 function RowHeader({ title, action }: { title: string; action?: ReactNode }) {
   return (
     <View style={styles.rowHeader}>
@@ -175,6 +213,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: Spacing.two,
+  },
+  segments: {
+    flexDirection: 'row',
+    padding: Spacing.half + 1,
+    borderRadius: Radius.medium,
+  },
+  segment: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: Spacing.two,
+    borderRadius: Radius.small + 1,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'transparent',
   },
   notice: {
     paddingVertical: Spacing.two,

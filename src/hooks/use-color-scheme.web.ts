@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from 'react';
-import { useColorScheme as useRNColorScheme } from 'react-native';
+import { useColorScheme as useSystemColorScheme } from 'react-native';
+
+import { useAppearance } from '@/lib/appearance';
 
 const subscribe = () => () => {};
 
@@ -14,11 +16,9 @@ export function useColorScheme() {
     () => false
   );
 
-  const colorScheme = useRNColorScheme();
+  const system = useSystemColorScheme();
+  const appearance = useAppearance();
 
-  if (hasHydrated) {
-    return colorScheme;
-  }
-
-  return 'light';
+  if (!hasHydrated) return 'light';
+  return appearance === 'system' ? system : appearance;
 }
