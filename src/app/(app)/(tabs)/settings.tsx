@@ -1,13 +1,13 @@
-import { useState } from 'react';
+import { Children, useState, type PropsWithChildren, type ReactNode } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Section } from '@/components/card-sections';
 import { CopyButton } from '@/components/copy-button';
 import { PrimaryButton } from '@/components/primary-button';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { MaxContentWidth, Spacing } from '@/constants/theme';
+import { BottomTabInset, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 import { useSession } from '@/lib/session';
 import { supabase } from '@/lib/supabase';
 
@@ -31,46 +31,108 @@ export default function SettingsScreen() {
     <ThemedView style={styles.container}>
       <SafeAreaView edges={['top']} style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.content}>
-          <ThemedText type="subtitle">Settings</ThemedText>
+          <ThemedText type="subtitle" style={styles.inset}>
+            Settings
+          </ThemedText>
 
-          <Section title="Account">
-            <ThemedText>{session?.user.email}</ThemedText>
-          </Section>
-
-          <Section title="iPhone Shortcut">
-            <ThemedText themeColor="textSecondary">
-              The Reeldex Shortcut posts videos to this address with your token in the
-              x-reeldex-token header.
-            </ThemedText>
-            <ThemedView type="backgroundElement" style={styles.box}>
-              <ThemedText type="code" selectable>
-                {INGEST_URL}
+          <Group label="Account">
+            <View style={styles.row}>
+              <ThemedText type="small" themeColor="textSecondary">
+                Signed in as
               </ThemedText>
-              <CopyButton text={INGEST_URL} label="Copy URL" />
-            </ThemedView>
+              <ThemedText numberOfLines={1}>{session?.user.email}</ThemedText>
+            </View>
+          </Group>
 
-            {token ? (
-              <ThemedView type="backgroundElement" style={styles.box}>
+          <Group
+            label="iPhone Shortcut"
+            note="The Reeldex Shortcut posts videos to this address with your token in the x-reeldex-token header.">
+            <View style={styles.row}>
+              <RowHeader title="Ingest URL" action={<CopyButton text={INGEST_URL} label="Copy URL" />} />
+              <CodeBox>{INGEST_URL}</CodeBox>
+            </View>
+            <View style={styles.row}>
+              {token ? (
+                <>
+                  <RowHeader title="Shortcut token" action={<CopyButton text={token} label="Copy token" />} />
+                  <CodeBox>{token}</CodeBox>
+                  <ThemedView type="warningBackground" style={styles.notice}>
+                    <ThemedText type="small" themeColor="warning">
+                      Copy this now. It won&apos;t be shown again.
+                    </ThemedText>
+                  </ThemedView>
+                </>
+              ) : (
+                <>
+                  <RowHeader title="Shortcut token" />
+                  <ThemedText type="small" themeColor="textSecondary">
+                    Create a token and paste it into the Shortcut. It&apos;s only shown once.
+                  </ThemedText>
+                  <PrimaryButton title="New Shortcut token" onPress={createToken} busy={busy} />
+                </>
+              )}
+              {error && (
                 <ThemedText type="small" themeColor="warning">
-                  Copy this now. It won&apos;t be shown again.
+                  {error}
                 </ThemedText>
-                <ThemedText type="code" selectable>
-                  {token}
-                </ThemedText>
-                <CopyButton text={token} label="Copy token" />
-              </ThemedView>
-            ) : (
-              <PrimaryButton title="New Shortcut token" onPress={createToken} busy={busy} />
-            )}
-            {error && <ThemedText themeColor="warning">{error}</ThemedText>}
-          </Section>
+              )}
+            </View>
+          </Group>
 
-          <View style={styles.signOut}>
-            <PrimaryButton title="Sign out" tone="warning" onPress={signOut} />
-          </View>
+          <Group>
+            <View style={styles.row}>
+              <PrimaryButton title="Sign out" tone="warning" variant="outline" onPress={signOut} />
+            </View>
+          </Group>
         </ScrollView>
       </SafeAreaView>
     </ThemedView>
+  );
+}
+
+// A Notion-style group: an eyebrow label, then its rows in one white card split by hairlines.
+function Group({ label, note, children }: PropsWithChildren<{ label?: string; note?: string }>) {
+  const theme = useTheme();
+  return (
+    <View style={styles.group}>
+      {label && (
+        <ThemedText type="eyebrow" themeColor="textTertiary" style={styles.inset}>
+          {label}
+        </ThemedText>
+      )}
+      <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+        {Children.toArray(children).map((row, i) => (
+          <View key={i} style={i > 0 && [styles.divided, { borderTopColor: theme.border }]}>
+            {row}
+          </View>
+        ))}
+      </View>
+      {note && (
+        <ThemedText type="small" themeColor="textSecondary" style={styles.inset}>
+          {note}
+        </ThemedText>
+      )}
+    </View>
+  );
+}
+
+function RowHeader({ title, action }: { title: string; action?: ReactNode }) {
+  return (
+    <View style={styles.rowHeader}>
+      <ThemedText type="smallBold">{title}</ThemedText>
+      {action}
+    </View>
+  );
+}
+
+function CodeBox({ children }: { children: string }) {
+  const theme = useTheme();
+  return (
+    <View style={[styles.codeBox, { backgroundColor: theme.backgroundElement, borderColor: theme.border }]}>
+      <ThemedText type="code" selectable style={styles.code}>
+        {children}
+      </ThemedText>
+    </View>
   );
 }
 
@@ -85,15 +147,48 @@ const styles = StyleSheet.create({
     maxWidth: MaxContentWidth,
   },
   content: {
-    gap: Spacing.four,
-    padding: Spacing.three,
+    gap: Spacing.five,
+    paddingHorizontal: Spacing.three,
+    paddingTop: Spacing.four,
+    paddingBottom: BottomTabInset + Spacing.five,
   },
-  box: {
+  inset: {
+    paddingHorizontal: Spacing.one,
+  },
+  group: {
+    gap: Spacing.two,
+  },
+  card: {
+    borderRadius: Radius.large,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+  },
+  divided: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  row: {
     gap: Spacing.two,
     padding: Spacing.three,
-    borderRadius: Spacing.three,
   },
-  signOut: {
-    marginTop: Spacing.four,
+  rowHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  notice: {
+    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    borderRadius: Radius.small,
+  },
+  codeBox: {
+    paddingVertical: Spacing.two + Spacing.half,
+    paddingHorizontal: Spacing.three - Spacing.one,
+    borderRadius: Radius.small,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  code: {
+    fontSize: 13,
+    lineHeight: 19,
   },
 });
