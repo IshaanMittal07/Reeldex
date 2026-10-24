@@ -1,9 +1,0 @@
-{
-  "name": "reeldex-frames",
-  "private": true,
-  "type": "module",
-  "description": "Cuts key frames from a reel with ffmpeg (run by .github/workflows/frames.yml).",
-  "dependencies": {
-    "@supabase/supabase-js": "^2.118.0"
-  }
-}

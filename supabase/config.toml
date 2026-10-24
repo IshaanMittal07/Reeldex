@@ -417,4 +417,3 @@ enabled = true
 [functions.ingest]
 # The iOS Shortcut authenticates with a personal x-reeldex-token, not a JWT.
 verify_jwt = false
-static_files = ["../prompts/extract.v3.md"]

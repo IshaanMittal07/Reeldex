@@ -1,19 +1,17 @@
 // POST /functions/v1/ingest
-//   From the iOS Shortcut: header `x-reeldex-token: rdx_...`, body is either
-//   multipart/form-data (field `video`, optional `url` and `caption`) or the raw
-//   video bytes (optional `?url=` and `?caption=`). Replies 202 with the job id
-//   right away; extraction runs in the background (EdgeRuntime.waitUntil).
-//   From pg_cron: header `x-worker-secret`, body {"sweep": true}. Retries stuck jobs.
+//   From the iOS Shortcut: header `x-reeldex-token: rdx_...`, plus `?url=` (the
+//   reel link). The body is empty (the server fetches the video from Instagram),
+//   the raw video bytes, or multipart/form-data (field `video`). Stores the
+//   video, replies 202 with the job id and starts the GitHub Actions worker
+//   (tools/worker), which makes the card and cuts the frames.
+//   From pg_cron: header `x-worker-secret`, body {"sweep": true}. Restarts stuck jobs.
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 import { createClient } from '@supabase/supabase-js';
 
-import { cardJsonSchema, cardSchema } from '../../../shared/schemas/card.ts';
 import { reelUrl } from '../../../shared/reel-url.ts';
-import { deleteFile, extract, RateLimitError, uploadFile, waitUntilActive } from './gemini.ts';
-import { dispatchFrames } from './github.ts';
+import { dispatchJob } from './github.ts';
 import { downloadVideo, fetchCaption, fetchEmbed } from './instagram.ts';
 
-const PROMPT_VERSION = 'extract.v3';
 const MAX_ATTEMPTS = 3;
 // The whole video sits in memory (256 MB on the free plan), so stay well under that.
 const MAX_BYTES = 120 * 1024 * 1024;
@@ -22,10 +20,7 @@ const BUCKET = 'incoming';
 // numbered parts: <path>, <path>.1, <path>.2 ...
 const PART_BYTES = 45 * 1024 * 1024;
 const MAX_PARTS = Math.ceil(MAX_BYTES / PART_BYTES);
-// Gemini names .mov as video/mov, iOS sends video/quicktime.
-const GEMINI_MIME: Record<string, string> = { 'video/mp4': 'video/mp4', 'video/quicktime': 'video/mov' };
-
-const promptTemplate = Deno.readTextFile(new URL('../../../prompts/extract.v3.md', import.meta.url));
+const VIDEO_TYPES = ['video/mp4', 'video/quicktime'];
 
 function secretKey() {
   const keys = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? '{}') as Record<string, string>;
@@ -62,7 +57,7 @@ async function userFromToken(token: string | null) {
 // Shortcuts often labels uploads application/octet-stream, so trust the bytes:
 // MP4 and MOV both start with an `ftyp` box; brand `qt  ` means QuickTime.
 function sniffMime(bytes: Uint8Array, declared: string) {
-  if (GEMINI_MIME[declared]) return declared;
+  if (VIDEO_TYPES.includes(declared)) return declared;
   const box = new TextDecoder().decode(bytes.subarray(4, 12));
   if (!box.startsWith('ftyp')) return declared;
   return box.slice(4) === 'qt  ' ? 'video/quicktime' : 'video/mp4';
@@ -99,27 +94,6 @@ async function storeVideo(path: string, bytes: Uint8Array, contentType: string) 
     if (error) return error;
   }
   return null;
-}
-
-// Reads parts in order until the next one is missing.
-async function loadVideo(path: string) {
-  const parts: Uint8Array[] = [];
-  for (let i = 0; i < MAX_PARTS; i++) {
-    const { data, error } = await db.storage.from(BUCKET).download(partPath(path, i));
-    if (error || !data) {
-      if (i === 0) throw new Error(`Video missing from storage: ${error?.message}`);
-      break;
-    }
-    parts.push(new Uint8Array(await data.arrayBuffer()));
-  }
-  if (parts.length === 1) return parts[0];
-  const bytes = new Uint8Array(parts.reduce((n, p) => n + p.byteLength, 0));
-  let offset = 0;
-  for (const p of parts) {
-    bytes.set(p, offset);
-    offset += p.byteLength;
-  }
-  return bytes;
 }
 
 function removeVideo(path: string) {
@@ -164,6 +138,9 @@ async function handleUpload(req: Request) {
       return json({ error: `Couldn't download the reel: ${err instanceof Error ? err.message : err}` }, 502);
     }
     upload.caption ||= embed.caption;
+  } else if (!upload.caption && upload.url) {
+    // Uploaded video: still read the caption (often the full recipe) from Instagram.
+    upload.caption = await fetchCaption(upload.url);
   }
 
   upload.mimeType = sniffMime(upload.bytes, upload.mimeType);
@@ -171,7 +148,7 @@ async function handleUpload(req: Request) {
     const mb = (upload.bytes.byteLength / 1024 / 1024).toFixed(1);
     return json({ error: `Video is ${mb} MB; the limit is ${MAX_BYTES / 1024 / 1024} MB` }, 413);
   }
-  if (!GEMINI_MIME[upload.mimeType]) return json({ error: `Unsupported type ${upload.mimeType}` }, 415);
+  if (!VIDEO_TYPES.includes(upload.mimeType)) return json({ error: `Unsupported type ${upload.mimeType}` }, 415);
 
   const videoHash = await sha256Hex(upload.bytes);
   const { data: existing } = await db
@@ -214,111 +191,30 @@ async function handleUpload(req: Request) {
   });
   if (jobError) return json({ error: `Jobs: ${jobError.message}` }, 500);
 
-  EdgeRuntime.waitUntil(processJob(jobId, upload.bytes));
+  // Not started: keep the reason on the job; the sweeper tries again within 5 minutes.
+  const dispatchError = await dispatchJob(jobId);
+  if (dispatchError) await db.from('jobs').update({ error: dispatchError }).eq('id', jobId);
   return json({ job_id: jobId, status: 'queued' }, 202);
 }
 
-async function processJob(jobId: string, bytes?: Uint8Array) {
-  const { data: job, error } = await db
-    .from('jobs')
-    .update({ status: 'processing', started_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-    .eq('id', jobId)
-    .in('status', ['queued', 'processing'])
-    .select('*')
-    .single();
-  if (error || !job) return console.error('processJob: could not claim', jobId, error);
-
-  const attempts = job.attempts + 1;
-  await db.from('jobs').update({ attempts }).eq('id', jobId);
-
-  let geminiFile: string | undefined;
-  try {
-    bytes ??= await loadVideo(job.video_path);
-
-    const mimeType = GEMINI_MIME[job.mime_type ?? 'video/mp4'] ?? 'video/mp4';
-    let file = await uploadFile(bytes, mimeType, jobId);
-    geminiFile = file.name;
-    file = await waitUntilActive(file);
-
-    // The Shortcut only sends the link, so read the caption (often the full recipe) ourselves.
-    if (!job.caption && job.source_url) {
-      job.caption = await fetchCaption(job.source_url);
-      if (job.caption) await db.from('jobs').update({ caption: job.caption }).eq('id', jobId);
-    }
-
-    const prompt = (await promptTemplate).replace('{caption}', job.caption ?? '');
-    const primary = Deno.env.get('GEMINI_MODEL')!;
-    const budget = Deno.env.get('GEMINI_MODEL_BUDGET')!;
-    let model = primary;
-    let text: string;
-    try {
-      text = await extract({ model, prompt, fileUri: file.uri, mimeType, schema: cardJsonSchema });
-    } catch (err) {
-      if (!(err instanceof RateLimitError) || !budget) throw err;
-      model = budget;
-      text = await extract({ model, prompt, fileUri: file.uri, mimeType, schema: cardJsonSchema });
-    }
-
-    const card = cardSchema.parse(JSON.parse(text)) as Record<string, any>;
-    const { data: saved, error: cardError } = await db.from('cards').insert({
-      user_id: job.user_id,
-      job_id: jobId,
-      category: card.category,
-      title: card.title,
-      summary: card.one_line_summary,
-      data: card,
-      resources: card.resources,
-      warnings: card.warnings,
-      source_url: job.source_url,
-      creator_handle: card.creator_handle,
-      model_version: model,
-      prompt_version: PROMPT_VERSION,
-    }).select('id').single();
-    if (cardError || !saved) throw new Error(`Cards: ${cardError?.message}`);
-
-    // Frames to cut: keep the video for the Actions job, which deletes it when done.
-    const framesError = card.key_frames?.length ? await dispatchFrames(jobId) : 'no key frames';
-    if (!framesError) {
-      await db
-        .from('jobs')
-        .update({ status: 'done', error: null, frames_status: 'pending', updated_at: new Date().toISOString() })
-        .eq('id', jobId);
-    } else {
-      // The card is done either way; keep the dispatch reason so a silent failure is visible.
-      const error = card.key_frames?.length ? framesError : null;
-      await finish(jobId, job.video_path, { status: 'done', error });
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error('processJob failed', jobId, attempts, message);
-    if (attempts >= MAX_ATTEMPTS) {
-      await finish(jobId, job.video_path, { status: 'failed', error: message });
-    } else {
-      // Back in the queue; the pg_cron sweeper picks it up within 5 minutes.
-      await db.from('jobs').update({ status: 'queued', error: message, updated_at: new Date().toISOString() }).eq('id', jobId);
-    }
-  } finally {
-    if (geminiFile) await deleteFile(geminiFile).catch(() => {});
-  }
-}
-
-// Done or out of attempts: the video is never kept (plan Section 4).
-async function finish(jobId: string, videoPath: string | null, fields: { status: string; error: string | null }) {
+// Out of attempts: the video is never kept (plan Section 4).
+async function fail(jobId: string, videoPath: string | null, error: string) {
   if (videoPath) await removeVideo(videoPath);
   await db
     .from('jobs')
-    .update({ ...fields, video_path: null, updated_at: new Date().toISOString() })
+    .update({ status: 'failed', error, video_path: null, updated_at: new Date().toISOString() })
     .eq('id', jobId);
 }
 
+// Restarts jobs whose worker never started or died. The worker's own timeout is
+// 15 minutes, so anything "processing" for 20 has died.
 async function sweep() {
   const now = Date.now();
-  const queuedBefore = new Date(now - 2 * 60_000).toISOString();
-  // 150 s wall clock, so anything "processing" for 5 minutes has died.
-  const processingBefore = new Date(now - 5 * 60_000).toISOString();
+  const queuedBefore = new Date(now - 3 * 60_000).toISOString();
+  const processingBefore = new Date(now - 20 * 60_000).toISOString();
   const { data: stuck } = await db
     .from('jobs')
-    .select('id, attempts, video_path')
+    .select('id, attempts, video_path, error')
     .or(
       `and(status.eq.queued,updated_at.lt.${queuedBefore}),` +
         `and(status.eq.processing,started_at.lt.${processingBefore})`,
@@ -326,28 +222,19 @@ async function sweep() {
     .order('created_at')
     .limit(10);
 
-  let next: string | undefined;
+  // Attempts only count worker runs, so a broken dispatch (e.g. an expired GitHub
+  // token) keeps retrying until it's fixed instead of failing the reel.
   for (const job of stuck ?? []) {
     if (job.attempts >= MAX_ATTEMPTS) {
-      await finish(job.id, job.video_path, { status: 'failed', error: 'Gave up after retries' });
-    } else {
-      next ??= job.id;
+      await fail(job.id, job.video_path, job.error ?? 'Gave up after retries');
+      continue;
     }
+    const dispatchError = await dispatchJob(job.id);
+    await db
+      .from('jobs')
+      .update({ status: 'queued', error: dispatchError ?? job.error, updated_at: new Date().toISOString() })
+      .eq('id', job.id);
   }
-  // Frame jobs that never reported back: drop the video, keep the card.
-  const framesBefore = new Date(now - 20 * 60_000).toISOString();
-  const { data: lostFrames } = await db
-    .from('jobs')
-    .select('id, video_path')
-    .eq('frames_status', 'pending')
-    .lt('updated_at', framesBefore);
-  for (const job of lostFrames ?? []) {
-    if (job.video_path) await removeVideo(job.video_path);
-    await db.from('jobs').update({ frames_status: 'failed', video_path: null }).eq('id', job.id);
-  }
-
-  // One job per run keeps us inside the wall-clock limit and Gemini's RPM.
-  if (next) await processJob(next);
 }
 
 Deno.serve(async (req) => {

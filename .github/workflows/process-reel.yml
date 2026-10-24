@@ -1,0 +1,49 @@
+# Started by the `ingest` Edge Function (repository_dispatch) for every saved
+# reel. Gemini makes the card, ffmpeg cuts the frames; see
+# tools/worker/process-reel.mjs. Runs here because a long reel needs more than
+# the Edge Function's 150 s.
+name: Process reel
+
+on:
+  repository_dispatch:
+    types: [process-reel]
+
+permissions:
+  contents: read
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            tools/worker
+            shared
+            prompts
+
+      # Node 24 runs the shared TypeScript card schema without a build step.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install ffmpeg if missing
+        run: command -v ffmpeg || (sudo apt-get update && sudo apt-get install -y ffmpeg)
+
+      - name: Install worker dependencies
+        # The root link lets shared/schemas/card.ts resolve zod.
+        run: |
+          npm install --prefix tools/worker --no-audit --no-fund
+          ln -s tools/worker/node_modules node_modules
+
+      - name: Process reel
+        # Payload values go through env, never interpolated into the shell command.
+        env:
+          JOB_ID: ${{ github.event.client_payload.job_id }}
+          GEMINI_MODEL: ${{ github.event.client_payload.model }}
+          GEMINI_MODEL_BUDGET: ${{ github.event.client_payload.budget_model }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SUPABASE_URL: https://dlcmgwnrdtpibamzqvpx.supabase.co
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: node tools/worker/process-reel.mjs "$JOB_ID"

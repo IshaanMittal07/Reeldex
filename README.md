@@ -53,36 +53,41 @@ perks, fitness, food and more), and you can search all of them.
 ## How it works
 
 ```
- Instagram ── Download ──▶ Photos ── Share ──▶ Reeldex Shortcut (iOS)
-                                                   │  shrinks to 540p,
-                                                   │  attaches the reel link
-                                                   ▼
+ Instagram ── Share ──▶ Reeldex Shortcut (iOS) ── reel link ──▶
                                   Supabase Edge Function  `ingest`
-                                  token check · dedupe · quota · 202
-                                                   │  background task
+                                  token check · dedupe · quota
+                                  fetches the video + caption from
+                                  Instagram's public embed page · 202
+                                                   │  repository_dispatch
                                                    ▼
+                                  GitHub Actions worker (no time limit)
                                   Gemini watches the video, reads the
                                   on-screen text, listens to the audio
-                                                   │  JSON, validated with Zod
+                                  → JSON validated with Zod · ffmpeg
+                                  cuts the key frames and a thumbnail
+                                                   │
                                                    ▼
                                   Postgres `cards`  ──realtime──▶  Reeldex web app
 ```
 
 A few decisions worth knowing about:
 
-- **No scraping.** Instagram has no API for reel content, and downloading from
-  it is against its terms and App Store rules. So Reeldex never fetches
-  anything itself: you download the reel with Instagram's own Download button
-  and share the file. Reeldex just processes a video you handed it.
+- **Share is the whole flow.** The Shortcut sends only the reel's link; the
+  server reads the video and caption from Instagram's public embed page. That
+  is scraping, which Instagram's terms don't allow, so Reeldex is for personal
+  use only. Private reels can't be fetched this way: a second Shortcut uploads
+  a video downloaded with Instagram's own Download button instead.
 - **No App Store, no Mac, no cost.** The phone side is an iOS Shortcut plus a
   web app added to the Home Screen, which sidesteps the $99/year developer
   account entirely. Everything runs on free tiers: Supabase, the Gemini API
   and EAS Hosting.
 - **Videos aren't kept.** Each one is deleted from storage, and from Gemini,
-  as soon as its card is saved.
-- **Built to fail gracefully.** If Gemini hits its daily limit, the function
-  falls back to a lighter model. Jobs that stall are retried by a `pg_cron`
-  sweeper every five minutes. Re-sharing a video you've already sent doesn't
+  as soon as its card and frames are saved.
+- **Built to fail gracefully.** Long reels run on a free GitHub Actions runner
+  because the Edge Function stops after 150 seconds. If Gemini is overloaded or
+  hits its daily limit, the worker waits, retries and then falls back to a
+  lighter model. Jobs that stall are restarted by a `pg_cron` sweeper every
+  five minutes. Re-sharing a video you've already sent doesn't
   make a duplicate card.
 - **Your data is yours.** Row Level Security is on every table. The Shortcut
   signs in with a personal token, and the database stores only its SHA-256 hash.
@@ -92,17 +97,18 @@ A few decisions worth knowing about:
 | Layer | What |
 |---|---|
 | App | Expo SDK 57 · Expo Router · React Native Web · TypeScript |
-| Backend | Supabase Postgres, Auth, Storage, Realtime, Edge Functions (Deno), `pg_cron` |
+| Backend | Supabase Postgres, Auth, Storage, Realtime, Edge Functions (Deno), `pg_cron`; GitHub Actions worker (Node, ffmpeg) |
 | AI | Gemini video understanding, with structured JSON output checked against a shared schema |
 | Hosting | EAS Hosting at [reeldex.expo.app](https://reeldex.expo.app) |
-| Capture | iOS Shortcuts: Encode Media → POST to the Edge Function |
+| Capture | iOS Shortcuts: POST the reel link to the Edge Function |
 
 ## Project layout
 
 ```
 src/app/                    screens: sign-in, library, card, settings
 src/components/             card sections, category chips, reel link, tab bar
-supabase/functions/ingest/  upload → Gemini → card (REST, no SDK, fits the 5 MB bundle limit)
+supabase/functions/ingest/  intake: token, dedupe, fetch the reel, store it, start the worker
+tools/worker/               GitHub Actions worker: Gemini → card, ffmpeg → frames
 supabase/migrations/        schema, RLS, ingest tokens, retry sweeper, realtime
 shared/                     card schema and link cleanup, used by both app and backend
 prompts/                    versioned extraction prompts

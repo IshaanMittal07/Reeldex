@@ -1,8 +1,9 @@
-// Starts .github/workflows/frames.yml, which cuts the key frames with ffmpeg.
-// Edge Functions can't decode video (2 s CPU), so this runs on a free Actions runner.
-// Returns null once started, or why not (saved on the job) so the caller can fall back.
+// Starts .github/workflows/process-reel.yml, which turns the reel into a card
+// with Gemini and cuts its frames. It runs on a free Actions runner because a
+// long reel needs more than the Edge Function's 150 s.
+// Returns null once started, or why not (saved on the job).
 
-export async function dispatchFrames(jobId: string) {
+export async function dispatchJob(jobId: string) {
   const token = Deno.env.get('GITHUB_DISPATCH_TOKEN');
   const repo = Deno.env.get('GITHUB_REPO');
   if (!token || !repo) return 'GITHUB_DISPATCH_TOKEN or GITHUB_REPO not set';
@@ -15,10 +16,18 @@ export async function dispatchFrames(jobId: string) {
       'X-GitHub-Api-Version': '2022-11-28',
       'User-Agent': 'reeldex-ingest',
     },
-    body: JSON.stringify({ event_type: 'extract-frames', client_payload: { job_id: jobId } }),
+    body: JSON.stringify({
+      event_type: 'process-reel',
+      // Model names are config (Supabase secrets), not secret, so they travel in the payload.
+      client_payload: {
+        job_id: jobId,
+        model: Deno.env.get('GEMINI_MODEL'),
+        budget_model: Deno.env.get('GEMINI_MODEL_BUDGET'),
+      },
+    }),
   });
   if (res.ok) return null;
   const reason = `GitHub dispatch ${res.status}: ${(await res.text()).slice(0, 200)}`;
-  console.error('frames dispatch failed', reason);
+  console.error('dispatch failed', reason);
   return reason;
 }

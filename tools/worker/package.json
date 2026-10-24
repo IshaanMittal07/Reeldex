@@ -1,0 +1,10 @@
+{
+  "name": "reeldex-worker",
+  "private": true,
+  "type": "module",
+  "description": "Turns a saved reel into a card with Gemini and cuts its frames with ffmpeg (run by .github/workflows/process-reel.yml).",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.118.0",
+    "zod": "^4.6.7"
+  }
+}
