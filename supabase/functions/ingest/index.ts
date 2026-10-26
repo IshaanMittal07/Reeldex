@@ -89,7 +89,8 @@ const partPath = (path: string, i: number) => (i === 0 ? path : `${path}.${i}`);
 
 async function storeVideo(path: string, bytes: Uint8Array, contentType: string) {
   for (let i = 0; i * PART_BYTES < bytes.byteLength; i++) {
-    const part = new Blob([bytes.subarray(i * PART_BYTES, (i + 1) * PART_BYTES)], { type: contentType });
+    // A view, not a Blob: a 120 MB video must not be copied again (256 MB memory).
+    const part = bytes.subarray(i * PART_BYTES, (i + 1) * PART_BYTES);
     const { error } = await db.storage.from(BUCKET).upload(partPath(path, i), part, { contentType });
     if (error) return error;
   }
@@ -109,13 +110,19 @@ async function handleUpload(req: Request) {
     return json({ error: 'Invalid or missing x-reeldex-token' }, 401);
   }
 
+  if (Number(req.headers.get('content-length') ?? 0) > MAX_BYTES) {
+    await req.body?.cancel().catch(() => {});
+    return json({ error: `Video is over the ${MAX_BYTES / 1024 / 1024} MB limit` }, 413);
+  }
+
   const upload = await readUpload(req);
   if (!upload) return json({ error: 'No video in request' }, 400);
   upload.url = reelUrl(upload.url);
 
   // Link only (Shortcut v4): fetch the video from Instagram's public embed page.
   // Shortcuts sends an empty JSON body ("{}") for a POST without a file.
-  if (upload.bytes.byteLength < 1024) {
+  const downloaded = upload.bytes.byteLength < 1024;
+  if (downloaded) {
     upload.bytes = new Uint8Array();
     if (!upload.url) return json({ error: 'Send a video or an Instagram reel link' }, 400);
     const { data: seen } = await db
@@ -150,22 +157,26 @@ async function handleUpload(req: Request) {
   }
   if (!VIDEO_TYPES.includes(upload.mimeType)) return json({ error: `Unsupported type ${upload.mimeType}` }, 415);
 
-  const videoHash = await sha256Hex(upload.bytes);
-  const { data: existing } = await db
-    .from('jobs')
-    .select('id, status')
-    .eq('user_id', userId)
-    .eq('video_hash', videoHash)
-    .neq('status', 'failed')
-    .limit(1)
-    .maybeSingle();
-  if (existing) {
-    // Re-sharing a saved video with its link backfills the link.
-    if (upload.url) {
-      await db.from('jobs').update({ source_url: upload.url }).eq('id', existing.id).is('source_url', null);
-      await db.from('cards').update({ source_url: upload.url }).eq('job_id', existing.id).is('source_url', null);
+  // Downloaded reels are deduped by link above. Hashing copies the whole video,
+  // which a 120 MB download can't afford next to the bytes themselves.
+  const videoHash = downloaded ? null : await sha256Hex(upload.bytes);
+  if (videoHash) {
+    const { data: existing } = await db
+      .from('jobs')
+      .select('id, status')
+      .eq('user_id', userId)
+      .eq('video_hash', videoHash)
+      .neq('status', 'failed')
+      .limit(1)
+      .maybeSingle();
+    if (existing) {
+      // Re-sharing a saved video with its link backfills the link.
+      if (upload.url) {
+        await db.from('jobs').update({ source_url: upload.url }).eq('id', existing.id).is('source_url', null);
+        await db.from('cards').update({ source_url: upload.url }).eq('job_id', existing.id).is('source_url', null);
+      }
+      return json({ job_id: existing.id, status: existing.status, duplicate: true });
     }
-    return json({ job_id: existing.id, status: existing.status, duplicate: true });
   }
 
   const { data: allowed } = await db.rpc('use_quota', { p_user_id: userId });
@@ -189,7 +200,10 @@ async function handleUpload(req: Request) {
     video_hash: videoHash,
     mime_type: upload.mimeType,
   });
-  if (jobError) return json({ error: `Jobs: ${jobError.message}` }, 500);
+  if (jobError) {
+    await removeVideo(videoPath);
+    return json({ error: `Jobs: ${jobError.message}` }, 500);
+  }
 
   // Not started: keep the reason on the job; the sweeper tries again within 5 minutes.
   const dispatchError = await dispatchJob(jobId);
@@ -207,14 +221,14 @@ async function fail(jobId: string, videoPath: string | null, error: string) {
 }
 
 // Restarts jobs whose worker never started or died. The worker's own timeout is
-// 15 minutes, so anything "processing" for 20 has died.
+// 25 minutes, so anything "processing" for 30 has died.
 async function sweep() {
   const now = Date.now();
   const queuedBefore = new Date(now - 3 * 60_000).toISOString();
-  const processingBefore = new Date(now - 20 * 60_000).toISOString();
+  const processingBefore = new Date(now - 30 * 60_000).toISOString();
   const { data: stuck } = await db
     .from('jobs')
-    .select('id, attempts, video_path, error')
+    .select('id, status, attempts, video_path, error')
     .or(
       `and(status.eq.queued,updated_at.lt.${queuedBefore}),` +
         `and(status.eq.processing,started_at.lt.${processingBefore})`,
@@ -229,11 +243,18 @@ async function sweep() {
       await fail(job.id, job.video_path, job.error ?? 'Gave up after retries');
       continue;
     }
-    const dispatchError = await dispatchJob(job.id);
-    await db
+    // Requeue before dispatching (the worker only claims queued jobs), and only
+    // if nothing touched the job since it was read.
+    const { data: requeued } = await db
       .from('jobs')
-      .update({ status: 'queued', error: dispatchError ?? job.error, updated_at: new Date().toISOString() })
-      .eq('id', job.id);
+      .update({ status: 'queued', updated_at: new Date().toISOString() })
+      .eq('id', job.id)
+      .eq('status', job.status)
+      .eq('attempts', job.attempts)
+      .select('id');
+    if (!requeued?.length) continue;
+    const dispatchError = await dispatchJob(job.id);
+    if (dispatchError) await db.from('jobs').update({ error: dispatchError }).eq('id', job.id);
   }
 }
 

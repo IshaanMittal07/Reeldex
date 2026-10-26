@@ -18,6 +18,9 @@ const PROMPT_VERSION = 'extract.v3';
 const MAX_ATTEMPTS = 3;
 // Matches the ingest function's part layout: <path>, <path>.1, <path>.2.
 const MAX_PARTS = 3;
+// Stop starting new Gemini retries after this, so the job ends (and saves why)
+// before the workflow's 25-minute timeout kills it.
+const DEADLINE = Date.now() + 18 * 60_000;
 // Gemini names .mov as video/mov, iOS sends video/quicktime.
 const GEMINI_MIME = { 'video/mp4': 'video/mp4', 'video/quicktime': 'video/mov' };
 
@@ -42,35 +45,56 @@ function toSeconds(timestamp) {
 const toTimestamp = (seconds) =>
   `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 
+// Every stored part, listed first: a failed download must not pass for "no more
+// parts" and leave a cut-off video.
 async function loadVideo(path) {
+  const slash = path.lastIndexOf('/');
+  const name = path.slice(slash + 1);
+  const { data: files, error } = await db.storage
+    .from('incoming')
+    .list(path.slice(0, slash), { search: name, limit: 100 });
+  if (error) throw new Error(`Storage list: ${error.message}`);
+  const names = new Set(files.map((f) => f.name));
+  if (!names.has(name)) throw new Error('Video missing from storage');
+
   const parts = [];
-  for (let i = 0; i < MAX_PARTS; i++) {
-    const { data, error } = await db.storage.from('incoming').download(partPath(path, i));
-    if (error) {
-      if (i === 0) throw new Error(`Video missing from storage: ${error.message}`);
-      break;
-    }
-    parts.push(Buffer.from(await data.arrayBuffer()));
+  for (let i = 0; i < MAX_PARTS && names.has(partPath(name, i)); i++) {
+    parts.push(await withRetries(`Download part ${i}`, async () => {
+      const { data, error } = await db.storage.from('incoming').download(partPath(path, i));
+      if (error) throw new Error(`Download part ${i}: ${error.message}`);
+      return Buffer.from(await data.arrayBuffer());
+    }));
   }
   return Buffer.concat(parts);
 }
 
-// Overload (503) and rate limits (429) pass, so wait and retry, then fall back
-// to the budget model.
+// Overload (503), rate limits (429), timeouts (504) and dropped connections
+// pass, so wait and retry.
+const isTransient = (err) =>
+  err instanceof GeminiError ? [429, 500, 502, 503, 504].includes(err.status) : err instanceof TypeError;
+
+async function withRetries(what, fn, tries = 3) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (!isTransient(err) || attempt >= tries || Date.now() > DEADLINE) throw err;
+      console.warn(`${what} attempt ${attempt}: ${String(err.message).slice(0, 120)}`);
+      await sleep(attempt * 15_000);
+    }
+  }
+}
+
+// Then fall back to the budget model.
 async function extractWithRetries(opts) {
   const models = [process.env.GEMINI_MODEL, process.env.GEMINI_MODEL_BUDGET].filter(Boolean);
   let lastError;
   for (const model of models) {
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        return { model, text: await extract({ ...opts, model }) };
-      } catch (err) {
-        lastError = err;
-        const retriable = err instanceof GeminiError && [429, 500, 503].includes(err.status);
-        if (!retriable) throw err;
-        console.warn(`${model} attempt ${attempt}: ${err.message.slice(0, 120)}`);
-        if (attempt < 3) await sleep(attempt * 15_000);
-      }
+    try {
+      return { model, text: await withRetries(model, () => extract({ ...opts, model })) };
+    } catch (err) {
+      if (!isTransient(err)) throw err;
+      lastError = err;
     }
   }
   throw lastError;
@@ -78,9 +102,9 @@ async function extractWithRetries(opts) {
 
 async function makeCard(job, bytes) {
   const mimeType = GEMINI_MIME[job.mime_type] ?? 'video/mp4';
-  let file = await uploadFile(bytes, mimeType, job.id);
+  let file = await withRetries('Gemini upload', () => uploadFile(bytes, mimeType, job.id));
   try {
-    file = await waitUntilActive(file);
+    file = await withRetries('Gemini processing', () => waitUntilActive(file));
     const prompt = readFileSync(new URL('../../prompts/extract.v3.md', import.meta.url), 'utf8').replace(
       '{caption}',
       job.caption ?? '',
@@ -150,20 +174,36 @@ async function cutFrames(job, card, video, dir) {
   return frames;
 }
 
-// Done or out of attempts: the video is never kept.
-async function finish(job, fields) {
+// Done or out of attempts: the video is never kept. Every write is tied to this
+// run's attempt, so a run the sweeper replaced can't overwrite the newer one.
+async function finish(job, attempts, fields) {
   await db.storage.from('incoming').remove(Array.from({ length: MAX_PARTS }, (_, i) => partPath(job.video_path, i)));
-  await db.from('jobs').update({ ...fields, video_path: null, updated_at: now() }).eq('id', job.id);
+  await db
+    .from('jobs')
+    .update({ ...fields, video_path: null, updated_at: now() })
+    .eq('id', job.id)
+    .eq('attempts', attempts);
 }
 
 const { data: job } = await db.from('jobs').select('*').eq('id', jobId).maybeSingle();
-if (!job || !['queued', 'processing'].includes(job.status) || !job.video_path) {
+if (!job || job.status !== 'queued' || !job.video_path) {
   console.log('Nothing to do for', jobId);
   process.exit(0);
 }
 
-const attempts = job.attempts + 1;
-await db.from('jobs').update({ status: 'processing', attempts, started_at: now(), updated_at: now() }).eq('id', jobId);
+// Claim the job; if a second dispatch of it got here first, leave it alone.
+const attempts = (job.attempts ?? 0) + 1;
+const { data: claimed } = await db
+  .from('jobs')
+  .update({ status: 'processing', attempts, started_at: now(), updated_at: now() })
+  .eq('id', jobId)
+  .eq('status', 'queued')
+  .eq('attempts', job.attempts ?? 0)
+  .select('id');
+if (!claimed?.length) {
+  console.log('Already claimed:', jobId);
+  process.exit(0);
+}
 
 try {
   const dir = mkdtempSync(join(tmpdir(), 'reel-'));
@@ -172,18 +212,22 @@ try {
   writeFileSync(video, bytes);
 
   // A retry after a frames failure already has its card.
-  const { data: existing } = await db.from('cards').select('id, data').eq('job_id', jobId).maybeSingle();
-  const card = existing ?? (await makeCard(job, bytes));
+  const { data: existing } = await db.from('cards').select('id, data').eq('job_id', jobId).limit(1);
+  const card = existing?.[0] ?? (await makeCard(job, bytes));
   const frames = await cutFrames(job, card, video, dir);
-  await finish(job, { status: 'done', error: null, frames_status: frames.length ? 'done' : 'failed' });
+  await finish(job, attempts, { status: 'done', error: null, frames_status: frames.length ? 'done' : 'failed' });
 } catch (err) {
   const message = err instanceof Error ? err.message : String(err);
   console.error(`Attempt ${attempts} failed:`, message);
   if (attempts >= MAX_ATTEMPTS) {
-    await finish(job, { status: 'failed', error: message });
+    await finish(job, attempts, { status: 'failed', error: message });
   } else {
     // Back in the queue; the pg_cron sweeper starts it again within 5 minutes.
-    await db.from('jobs').update({ status: 'queued', error: message, updated_at: now() }).eq('id', jobId);
+    await db
+      .from('jobs')
+      .update({ status: 'queued', error: message, updated_at: now() })
+      .eq('id', jobId)
+      .eq('attempts', attempts);
   }
   process.exitCode = 1;
 }

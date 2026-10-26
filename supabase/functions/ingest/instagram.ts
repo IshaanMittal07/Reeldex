@@ -48,9 +48,38 @@ export async function fetchCaption(reelUrl: string) {
   return (await fetchEmbed(reelUrl)).caption;
 }
 
+// Streams into one buffer (a plain arrayBuffer() briefly holds the video twice,
+// too much for 256 MB). Gives up after 20 s without data, or 100 s in all.
 export async function downloadVideo(videoUrl: string, maxBytes: number) {
-  const res = await fetch(videoUrl, { signal: AbortSignal.timeout(30_000) });
-  if (!res.ok) throw new Error(`Instagram video ${res.status}`);
-  if (Number(res.headers.get('content-length') ?? 0) > maxBytes) throw new Error('Instagram video too large');
-  return new Uint8Array(await res.arrayBuffer());
+  const controller = new AbortController();
+  const total = setTimeout(() => controller.abort(), 100_000);
+  let idle = setTimeout(() => controller.abort(), 20_000);
+  try {
+    const res = await fetch(videoUrl, { signal: controller.signal });
+    if (!res.ok || !res.body) throw new Error(`Instagram video ${res.status}`);
+    const length = Number(res.headers.get('content-length') ?? 0);
+    if (length > maxBytes) throw new Error('Instagram video too large');
+
+    let buffer = new Uint8Array(length || 16 * 1024 * 1024);
+    let size = 0;
+    for await (const chunk of res.body) {
+      clearTimeout(idle);
+      idle = setTimeout(() => controller.abort(), 20_000);
+      if (size + chunk.byteLength > maxBytes) throw new Error('Instagram video too large');
+      if (size + chunk.byteLength > buffer.byteLength) {
+        const grown = new Uint8Array(Math.min(maxBytes, Math.max(buffer.byteLength * 2, size + chunk.byteLength)));
+        grown.set(buffer.subarray(0, size));
+        buffer = grown;
+      }
+      buffer.set(chunk, size);
+      size += chunk.byteLength;
+    }
+    return buffer.subarray(0, size);
+  } catch (err) {
+    if (controller.signal.aborted) throw new Error('Instagram download timed out');
+    throw err;
+  } finally {
+    clearTimeout(total);
+    clearTimeout(idle);
+  }
 }
