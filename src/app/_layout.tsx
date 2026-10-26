@@ -3,7 +3,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { Platform } from 'react-native';
 
-import { AnimatedSplashOverlay } from '@/components/animated-icon';
+import { IntroOverlay } from '@/components/intro-overlay';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { SessionProvider, useSession } from '@/lib/session';
@@ -24,8 +24,8 @@ export default function RootLayout() {
   return (
     <SessionProvider>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <AnimatedSplashOverlay />
         <RootNavigator />
+        <IntroOverlay />
       </ThemeProvider>
     </SessionProvider>
   );
