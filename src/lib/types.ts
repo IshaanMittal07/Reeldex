@@ -1,17 +1,24 @@
 // Row shapes the app reads. `CardData` mirrors shared/schemas/card.ts, kept as a
 // plain type so the app bundle doesn't pull in zod.
 
-export type Category =
-  | 'resume'
-  | 'applying'
-  | 'cold_dm'
-  | 'opportunity'
-  | 'student_benefit'
-  | 'fitness'
-  | 'meal_plan'
-  | 'grooming'
-  | 'video_creation'
-  | 'general';
+// Mirrors CATEGORIES in shared/schemas/card.ts, in the order the library shows them.
+export const CATEGORIES = [
+  'resume',
+  'applying',
+  'cold_dm',
+  'opportunity',
+  'student_benefit',
+  'food',
+  'fitness',
+  'grooming',
+  'money',
+  'tech',
+  'video_creation',
+  'travel',
+  'general',
+] as const;
+
+export type Category = (typeof CATEGORIES)[number];
 
 export type KeyPoint = { text: string; timestamp: string; uncertain: boolean };
 
@@ -95,13 +102,41 @@ export type Job = {
 
 export const CATEGORY_LABELS: Record<Category, string> = {
   resume: 'Resume',
-  applying: 'Applying',
-  cold_dm: 'Cold DMs',
+  applying: 'Jobs & interviews',
+  cold_dm: 'Networking',
   opportunity: 'Opportunities',
   student_benefit: 'Student perks',
+  food: 'Food',
   fitness: 'Fitness',
-  meal_plan: 'Food',
-  grooming: 'Grooming',
-  video_creation: 'Video creation',
+  grooming: 'Style & grooming',
+  money: 'Money',
+  tech: 'Tech & AI',
+  video_creation: 'Content creation',
+  travel: 'Travel',
   general: 'General',
 };
+
+// Shown in place of a thumbnail until the reel's frames are captured.
+export const CATEGORY_GLYPHS: Record<Category, string> = {
+  resume: '📄',
+  applying: '💼',
+  cold_dm: '💬',
+  opportunity: '✨',
+  student_benefit: '🎓',
+  food: '🍩',
+  fitness: '🏋️',
+  grooming: '🧴',
+  money: '💸',
+  tech: '💻',
+  video_creation: '🎬',
+  travel: '✈️',
+  general: '📌',
+};
+
+// Cards made before prompt v4 can say meal_plan (now food); anything unknown is general.
+const LEGACY_CATEGORIES: Record<string, Category> = { meal_plan: 'food' };
+
+export function toCategory(value: string): Category {
+  if ((CATEGORIES as readonly string[]).includes(value)) return value as Category;
+  return LEGACY_CATEGORIES[value] ?? 'general';
+}

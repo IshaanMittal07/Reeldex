@@ -1,9 +1,22 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { supabase } from '@/lib/supabase';
-import type { Card } from '@/lib/types';
+import { toCategory, type Card } from '@/lib/types';
 
 const COLUMNS = 'id, category, title, summary, data, frames, source_url, creator_handle, pinned, created_at';
+
+// Old category names (meal_plan) read as their current ones.
+function normalize(card: Card): Card {
+  return {
+    ...card,
+    category: toCategory(card.category),
+    data: {
+      ...card.data,
+      category: toCategory(card.data.category),
+      secondary_categories: (card.data.secondary_categories ?? []).map(toCategory),
+    },
+  };
+}
 
 // All of the user's cards (RLS scopes the query), newest first, kept live via
 // Realtime so a card shared from the Shortcut appears without a refresh.
@@ -19,7 +32,7 @@ export function useCards() {
       .order('pinned', { ascending: false })
       .order('created_at', { ascending: false });
     setError(error?.message ?? null);
-    if (data) setCards(data as Card[]);
+    if (data) setCards((data as Card[]).map(normalize));
     setIsLoading(false);
   }, []);
 
@@ -49,7 +62,7 @@ export function useCard(id: string) {
         .eq('id', id)
         .maybeSingle()
         .then(({ data }) => {
-          setCard(data as Card | null);
+          setCard(data ? normalize(data as Card) : null);
           setIsLoading(false);
         });
     // Live: frames are added to the card a minute or so after it's created.

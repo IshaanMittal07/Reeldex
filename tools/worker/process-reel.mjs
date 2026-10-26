@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import { cardJsonSchema, cardSchema } from '../../shared/schemas/card.ts';
 import { deleteFile, extract, GeminiError, uploadFile, waitUntilActive } from './gemini.mjs';
 
-const PROMPT_VERSION = 'extract.v3';
+const PROMPT_VERSION = 'extract.v4';
 const MAX_ATTEMPTS = 3;
 // Matches the ingest function's part layout: <path>, <path>.1, <path>.2.
 const MAX_PARTS = 3;
@@ -105,7 +105,7 @@ async function makeCard(job, bytes) {
   let file = await withRetries('Gemini upload', () => uploadFile(bytes, mimeType, job.id));
   try {
     file = await withRetries('Gemini processing', () => waitUntilActive(file));
-    const prompt = readFileSync(new URL('../../prompts/extract.v3.md', import.meta.url), 'utf8').replace(
+    const prompt = readFileSync(new URL('../../prompts/extract.v4.md', import.meta.url), 'utf8').replace(
       '{caption}',
       job.caption ?? '',
     );

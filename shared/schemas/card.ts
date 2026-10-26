@@ -6,7 +6,8 @@ type JSONSchema = z.core.JSONSchema.JSONSchema;
 // Gemini structured output takes; the Zod validator is derived from it so the
 // two can never drift apart. Sprint 0 covers the base + resume + cold_dm;
 // v2 adds key_frames (cut from the video by ffmpeg) and an app-drawn visual;
-// v3 adds takeaways, the reel boiled down with the fluff removed.
+// v3 adds takeaways, the reel boiled down with the fluff removed; v4 replaces
+// meal_plan with food and adds money, tech and travel so fewer reels land in general.
 
 export const CATEGORIES = [
   'resume',
@@ -14,10 +15,13 @@ export const CATEGORIES = [
   'cold_dm',
   'opportunity',
   'student_benefit',
+  'food',
   'fitness',
-  'meal_plan',
   'grooming',
+  'money',
+  'tech',
   'video_creation',
+  'travel',
   'general',
 ] as const;
 
