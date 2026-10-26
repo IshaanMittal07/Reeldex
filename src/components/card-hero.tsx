@@ -7,12 +7,13 @@ import { ThemedView } from './themed-view';
 
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import type { Card } from '@/lib/types';
-import { CATEGORY_LABELS } from '@/lib/types';
+import { CATEGORY_GLYPHS, CATEGORY_LABELS, type Card } from '@/lib/types';
 
 type Props = {
   card: Card;
   coverUrl?: string;
+  // Off for an automatic cover, whose time in the reel means nothing.
+  showTimestamp: boolean;
   framesPending: boolean;
   onOpenCover: () => void;
 };
@@ -23,12 +24,12 @@ const FADE = [0.02, 0.04, 0.07, 0.1, 0.14, 0.18];
 
 // Top of the card page: the first frame as a cover (or a pale green band until
 // frames arrive), then category, title, summary and a quiet meta line.
-export function CardHero({ card, coverUrl, framesPending, onOpenCover }: Props) {
+export function CardHero({ card, coverUrl, showTimestamp, framesPending, onOpenCover }: Props) {
   const theme = useTheme();
   const { width } = useWindowDimensions();
   // 4:5 on a phone, capped so a wide window doesn't get a wall of image.
   const coverHeight = Math.min(((Math.min(width, MaxContentWidth) - Spacing.three * 2) * 5) / 4, 440);
-  const category = CATEGORY_LABELS[card.category] ?? card.category;
+  const category = `${CATEGORY_GLYPHS[card.category]}  ${CATEGORY_LABELS[card.category]}`;
   const cover = card.frames[0];
   const saved = new Date(card.created_at).toLocaleDateString(undefined, {
     month: 'short',
@@ -51,15 +52,17 @@ export function CardHero({ card, coverUrl, framesPending, onOpenCover }: Props) 
                 <View key={o} style={[styles.fadeBand, { backgroundColor: `rgba(0,0,0,${o})` }]} />
               ))}
             </View>
-            <View style={styles.coverStamp}>
-              <TimestampPill value={cover.timestamp} />
-            </View>
+            {showTimestamp && (
+              <View style={styles.coverStamp}>
+                <TimestampPill value={cover.timestamp} />
+              </View>
+            )}
           </ThemedView>
         </Pressable>
       ) : (
         <ThemedView type="accentSoft" style={styles.band}>
           <ThemedText type="eyebrow" themeColor="accent">
-            {framesPending ? 'Frames on the way…' : 'Reeldex card'}
+            {framesPending ? 'Thumbnail on the way…' : 'Reeldex card'}
           </ThemedText>
           <ThemedText type="title" themeColor="accentStrong" style={styles.bandTitle}>
             {category}

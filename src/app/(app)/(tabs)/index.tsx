@@ -1,12 +1,13 @@
-import { useMemo, useState } from 'react';
-import { ActivityIndicator, RefreshControl, SectionList, StyleSheet, View } from 'react-native';
+import { useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { CardRow } from '@/components/card-row';
 import { CategoryChips } from '@/components/category-chips';
+import { CategoryShelf } from '@/components/category-shelf';
 import { JobsBanner } from '@/components/jobs-banner';
 import { LibraryEmptyState, LibraryNoMatches } from '@/components/library-empty-state';
 import { Logo } from '@/components/logo';
+import { ReelTile } from '@/components/reel-tile';
 import { TextField } from '@/components/text-field';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -17,11 +18,15 @@ import { useOpenJobs } from '@/hooks/use-open-jobs';
 import { useTheme } from '@/hooks/use-theme';
 import { CATEGORY_LABELS, type Card, type Category } from '@/lib/types';
 
+const GRID_GAP = Spacing.three - Spacing.one;
+const GRID_MIN_TILE = 150;
+
 function matches(card: Card, query: string) {
   const haystack = [
     card.title,
     card.summary,
     card.creator_handle,
+    CATEGORY_LABELS[card.category],
     ...(card.data.takeaways ?? []),
     ...card.data.key_points.map((p) => p.text),
     ...card.data.action_items,
@@ -42,50 +47,83 @@ function greeting() {
   return 'Good evening';
 }
 
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+// Library rows: one shelf per category, or rows of a grid once a category is
+// picked or a search is typed.
+type Row =
+  { key: string; kind: 'shelf'; category: Category; cards: Card[] } | { key: string; kind: 'grid'; cards: Card[] };
+
 export default function LibraryScreen() {
   const { cards, error, isLoading, refresh } = useCards();
   const jobs = useOpenJobs();
   const theme = useTheme();
+  const { width } = useWindowDimensions();
+  const listRef = useRef<FlatList<Row>>(null);
   const [category, setCategory] = useState<Category | null>(null);
   const [query, setQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
 
   const thumbs = useFrameUrls(cards.flatMap((c) => (c.frames[0] ? [c.frames[0].path] : [])));
-  const categories = useMemo(() => [...new Set(cards.map((c) => c.category))], [cards]);
-  const visible = cards.filter(
-    (c) => (!category || c.category === category) && (!query.trim() || matches(c, query.trim())),
-  );
-  // One group per category, the most recently used category first (cards come newest first).
-  const groups = new Map<Category, Card[]>();
-  for (const card of visible) groups.set(card.category, [...(groups.get(card.category) ?? []), card]);
-  const sections = [...groups].map(([key, data]) => ({ key, data }));
+
+  // Categories ordered by their newest reel, General always last. Each keeps
+  // the query's order: pinned first, then newest.
+  const groups = useMemo(() => {
+    const byCategory = new Map<Category, Card[]>();
+    for (const card of cards) byCategory.set(card.category, [...(byCategory.get(card.category) ?? []), card]);
+    const newest = (list: Card[]) => Math.max(...list.map((c) => Date.parse(c.created_at)));
+    return [...byCategory]
+      .sort(([a, x], [b, y]) => Number(a === 'general') - Number(b === 'general') || newest(y) - newest(x))
+      .map(([key, list]) => ({ category: key, cards: list }));
+  }, [cards]);
+
+  const search = query.trim();
+  const filtered = category !== null || search !== '';
+  const visible = cards.filter((c) => (!category || c.category === category) && (!search || matches(c, search)));
+
+  const contentWidth = Math.min(width, MaxContentWidth) - Spacing.three * 2;
+  const columns = Math.max(2, Math.floor((contentWidth + GRID_GAP) / (GRID_MIN_TILE + GRID_GAP)));
+  const tileWidth = (contentWidth - GRID_GAP * (columns - 1)) / columns;
+
+  const rows: Row[] = filtered
+    ? Array.from({ length: Math.ceil(visible.length / columns) }, (_, i) => ({
+        key: `grid-${i}`,
+        kind: 'grid' as const,
+        cards: visible.slice(i * columns, (i + 1) * columns),
+      }))
+    : groups.map((g) => ({ key: g.category, kind: 'shelf' as const, ...g }));
+
+  const selectCategory = (next: Category | null) => {
+    setCategory(next);
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+  };
 
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView edges={['top']} style={styles.safeArea}>
-        <SectionList
-          sections={sections}
-          keyExtractor={(c) => c.id}
-          stickySectionHeadersEnabled={false}
-          renderItem={({ item, index, section }) => (
-            <CardRow
-              card={item}
-              thumbUrl={item.frames[0] && thumbs[item.frames[0].path]}
-              isFirst={index === 0}
-              isLast={index === section.data.length - 1}
-            />
-          )}
-          renderSectionHeader={({ section }) => (
-            <View style={styles.sectionHeader}>
-              <ThemedText type="eyebrow" themeColor="textSecondary">
-                {CATEGORY_LABELS[section.key] ?? section.key}
-              </ThemedText>
-              <ThemedText type="eyebrow" themeColor="textTertiary">
-                {section.data.length}
-              </ThemedText>
-            </View>
-          )}
-          contentContainerStyle={styles.list}
+        <FlatList
+          ref={listRef}
+          data={rows}
+          keyExtractor={(row) => row.key}
+          keyboardShouldPersistTaps="handled"
+          renderItem={({ item }) =>
+            item.kind === 'shelf' ? (
+              <CategoryShelf category={item.category} cards={item.cards} thumbs={thumbs} onSeeAll={selectCategory} />
+            ) : (
+              <View style={styles.gridRow}>
+                {item.cards.map((card) => (
+                  <ReelTile
+                    key={card.id}
+                    card={card}
+                    width={tileWidth}
+                    thumbUrl={card.frames[0] && thumbs[card.frames[0].path]}
+                    showCategory={!category}
+                  />
+                ))}
+              </View>
+            )
+          }
+          contentContainerStyle={[styles.list, { gap: filtered ? Spacing.four : Spacing.five }]}
           refreshControl={
             <RefreshControl
               tintColor={theme.accent}
@@ -109,7 +147,7 @@ export default function LibraryScreen() {
                 <ThemedText type="heading">{greeting()}</ThemedText>
                 <ThemedText type="small" themeColor="textSecondary">
                   {cards.length
-                    ? `${cards.length} reel${cards.length > 1 ? 's' : ''} saved as notes.`
+                    ? `${plural(cards.length, 'reel', 'reels')} in ${plural(groups.length, 'category', 'categories')}.`
                     : 'Reels you save become notes here.'}
                 </ThemedText>
               </View>
@@ -119,11 +157,21 @@ export default function LibraryScreen() {
                 onChangeText={setQuery}
                 clearButtonMode="while-editing"
               />
-              {categories.length > 1 && (
-                <CategoryChips categories={categories} selected={category} onSelect={setCategory} />
+              {groups.length > 1 && (
+                <CategoryChips
+                  categories={groups.map((g) => g.category)}
+                  selected={category}
+                  onSelect={selectCategory}
+                />
               )}
               <JobsBanner jobs={jobs} />
               {error && <ThemedText themeColor="warning">{error}</ThemedText>}
+              {filtered && visible.length > 0 && (
+                <ThemedText type="eyebrow" themeColor="textSecondary">
+                  {category ? `${CATEGORY_LABELS[category]} · ` : ''}
+                  {plural(visible.length, search ? 'result' : 'reel', search ? 'results' : 'reels')}
+                </ThemedText>
+              )}
             </View>
           }
           ListEmptyComponent={
@@ -158,7 +206,6 @@ const styles = StyleSheet.create({
   },
   header: {
     gap: Spacing.three,
-    marginBottom: Spacing.one,
   },
   brand: {
     flexDirection: 'row',
@@ -174,12 +221,9 @@ const styles = StyleSheet.create({
     gap: Spacing.half,
     marginTop: Spacing.two,
   },
-  sectionHeader: {
+  gridRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: Spacing.one,
-    paddingTop: Spacing.four,
-    paddingBottom: Spacing.two,
+    gap: GRID_GAP,
   },
   loading: {
     marginTop: Spacing.five,

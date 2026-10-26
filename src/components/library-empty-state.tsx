@@ -6,7 +6,7 @@ import { ThemedText } from './themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
-const STEPS = ['In Instagram, tap Download on a reel', 'Open Share and pick Reeldex', 'Your card shows up here'];
+const STEPS = ['In Instagram, tap Share on a reel', 'Pick the Reeldex shortcut', 'Your card shows up here, sorted by category'];
 
 export function LibraryEmptyState() {
   const theme = useTheme();

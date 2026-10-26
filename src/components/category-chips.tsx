@@ -4,7 +4,7 @@ import { ThemedText } from './themed-text';
 
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { CATEGORY_LABELS, type Category } from '@/lib/types';
+import { CATEGORY_GLYPHS, CATEGORY_LABELS, type Category } from '@/lib/types';
 
 type Props = {
   categories: Category[];
@@ -37,7 +37,7 @@ export function CategoryChips({ categories, selected, onSelect }: Props) {
               pressed && styles.pressed,
             ]}>
             <ThemedText type="smallBold" themeColor={active ? 'onAccent' : 'textSecondary'} style={styles.label}>
-              {category ? CATEGORY_LABELS[category] : 'All'}
+              {category ? `${CATEGORY_GLYPHS[category]}  ${CATEGORY_LABELS[category]}` : 'All'}
             </ThemedText>
           </Pressable>
         );

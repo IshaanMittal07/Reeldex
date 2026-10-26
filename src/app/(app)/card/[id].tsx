@@ -56,9 +56,10 @@ export default function CardScreen() {
   }
 
   const { data } = card;
-  // Frames were requested and the card is recent enough that the job may still be running.
-  const framesPending =
-    !!data.key_frames?.length && !card.frames.length && openedAt - Date.parse(card.created_at) < 20 * 60_000;
+  // Every reel gets at least a cover frame; none yet on a recent card means the job is still cutting them.
+  const framesPending = !card.frames.length && openedAt - Date.parse(card.created_at) < 20 * 60_000;
+  // A lone cover (no key frames picked) is already the hero image; don't repeat it below.
+  const keyFrames = data.key_frames?.length ? frames : [];
 
   return (
     <ThemedView style={styles.container}>
@@ -66,6 +67,7 @@ export default function CardScreen() {
         <CardHero
           card={card}
           coverUrl={frames[0] ? urls[frames[0].path] : undefined}
+          showTimestamp={keyFrames.length > 0}
           framesPending={framesPending}
           onOpenCover={() => setViewing(0)}
         />
@@ -83,7 +85,12 @@ export default function CardScreen() {
         <ActionItems items={data.action_items} />
         <CategorySections data={data} />
         <Resources resources={data.resources} />
-        <FrameGallery frames={frames} urls={urls} pending={framesPending} onOpen={setViewing} />
+        <FrameGallery
+          frames={keyFrames}
+          urls={urls}
+          pending={framesPending && !!data.key_frames?.length}
+          onOpen={setViewing}
+        />
 
         <View style={[styles.footer, { borderTopColor: theme.border }]}>
           <Pressable
